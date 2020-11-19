@@ -34,6 +34,12 @@ module Polyglot
     Truffle::Interop.enumerable(object)
   end
 
+  class ForeignObject
+    def hello
+      "hello from polyglot"
+    end
+  end
+
 end
 
 module Java

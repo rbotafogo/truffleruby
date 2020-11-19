@@ -170,6 +170,7 @@ public class CoreLibrary {
     public final RubyClass securityErrorClass;
     public final RubyClass standardErrorClass;
     public final RubyModule polyglotModule;
+    public final RubyClass polyglotForeignObjectClass;
     public final RubyClass unsupportedMessageErrorClass;
     public final RubyClass stringClass;
     public final RubyClass symbolClass;
@@ -360,6 +361,7 @@ public class CoreLibrary {
         typeErrorClass = defineClass(standardErrorClass, "TypeError");
         zeroDivisionErrorClass = defineClass(standardErrorClass, "ZeroDivisionError");
         polyglotModule = defineModule("Polyglot");
+        polyglotForeignObjectClass = defineClass(polyglotModule, objectClass, "ForeignObject");
         unsupportedMessageErrorClass = defineClass(polyglotModule, standardErrorClass, "UnsupportedMessageError");
 
         // StandardError > RuntimeError
