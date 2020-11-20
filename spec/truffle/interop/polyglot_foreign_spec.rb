@@ -13,9 +13,9 @@ describe Polyglot do
   describe "PolyglotForeign Object" do
 
   it "should be able to create the ForeignClass" do
-    foreign = Polyglot::ForeignObject.new
-    foreign.class.should == Polyglot::ForeignObject
-    foreign.hello.should == "hello from polyglot"
+    foreign = Truffle::Interop::Foreign.new
+    foreign.class.should == Truffle::Interop::Foreign
+    foreign.hello.should == "hello from interop"
   end
 
 =begin
