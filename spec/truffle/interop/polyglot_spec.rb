@@ -10,6 +10,17 @@ require_relative '../../ruby/spec_helper'
 
 describe Polyglot do
 
+  describe "Access to ForeignObject" do
+
+    it "class ForeignObject should be created" do
+      foreign = Truffle::Interop.to_java_array([1, 2, 3])
+      # foreign[0].should == 1
+      # foreign = Polyglot::ForeignObject.new
+      foreign.hello.should == "hello from polyglot"
+    end
+
+  end
+
   describe ".eval(id, code)" do
 
     it "evals code in Ruby" do

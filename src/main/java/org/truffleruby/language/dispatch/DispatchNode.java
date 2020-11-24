@@ -131,6 +131,11 @@ public class DispatchNode extends FrameOrStorageSendingNode {
             return callForeign(receiver, methodName, block, arguments);
         }
 
+        if (isForeignCall.profile(metaclass == getContext().getCoreLibrary().polyglotForeignObjectClass)) {
+            System.out.printf("\n=====================\n I'm a meta class");
+            return callForeign(receiver, methodName, block, arguments);
+        }
+
         final InternalMethod method = methodLookup.execute(frame, metaclass, methodName, config);
 
         if (methodMissing.profile(method == null || method.isUndefined())) {
