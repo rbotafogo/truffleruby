@@ -111,6 +111,28 @@ public class DispatchNode extends FrameOrStorageSendingNode {
                 BranchProfile.create());
     }
 
+    private static boolean checkForeign(String methodName) {
+        switch (methodName) {
+            case "call":
+            case "bind":
+            case "nil?":
+            case "[]":
+            case "to_s":
+            case "equal?":
+            case "inspect":
+            case "is_a?":
+            case "to_java_array":
+            case "kind_of?":
+            case "respond_to?":
+            case "__send__":
+            case "to_ary":
+            case "object_id":
+                return true;
+            default:
+                return false;
+        }
+    }
+
     public Object call(Object receiver, String method, Object... arguments) {
         return execute(null, receiver, method, null, arguments);
     }
@@ -126,13 +148,17 @@ public class DispatchNode extends FrameOrStorageSendingNode {
     public Object execute(VirtualFrame frame, Object receiver, String methodName, RubyProc block, Object[] arguments) {
 
         final RubyClass metaclass = metaclassNode.execute(receiver);
+        boolean print_val = false;
 
         if (isForeignCall.profile(metaclass == getContext().getCoreLibrary().truffleInteropForeignClass)) {
-            return callForeign(receiver, methodName, block, arguments);
+            if (checkForeign(methodName)) {
+                return callForeign(receiver, methodName, block, arguments);
+            }
         }
 
-        if (isForeignCall.profile(metaclass == getContext().getCoreLibrary().polyglotForeignObjectClass)) {
-            System.out.printf("\n=====================\n I'm a meta class");
+        if (isForeignCall.profile(metaclass == getContext().getCoreLibrary().polyglotForeignObjectClass) &&
+            checkForeign(methodName)) {
+            System.out.printf("\n=====================method " + methodName + "\n");
             return callForeign(receiver, methodName, block, arguments);
         }
 
