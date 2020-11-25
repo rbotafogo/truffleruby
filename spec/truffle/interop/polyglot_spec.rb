@@ -18,6 +18,10 @@ describe Polyglot do
       foreign.hello.should == "hello from polyglot"
     end
 
+    it "should index array with 'at'" do
+       foreign = Truffle::Interop.to_java_array([1, 2, 3])
+       foreign.at(0).should == 1
+    end
   end
 
   describe ".eval(id, code)" do

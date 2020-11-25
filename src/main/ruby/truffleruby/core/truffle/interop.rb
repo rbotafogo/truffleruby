@@ -197,16 +197,15 @@ module Truffle
 
     class Foreign
 
-      def method_missing
-        puts "method missing"
-        "hello from polyglot"
-      end
-
       # Currently you cannot add methods here, as method calls on this class
       # (when the object is indeed foreign) are sent as interop messages,
       # rather than looking them up in the class.
       def hello
         "hello from polyglot"
+      end
+
+      def at(index)
+        self[index]
       end
     end
 
