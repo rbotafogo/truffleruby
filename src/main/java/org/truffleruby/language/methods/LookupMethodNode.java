@@ -95,11 +95,12 @@ public abstract class LookupMethodNode extends RubyBaseNode {
         assert this != LookupMethodNodeGen.getUncached() || frame == null;
 
         // Actual lookup
-/*
         if (foreignProfile.profile(metaClass == context.getCoreLibrary().truffleInteropForeignClass)) {
-            return null;
+            if (checkForeign(name)) {
+                return null;
+            }
         }
-*/
+
         final DeclarationContext declarationContext = RubyArguments.tryGetDeclarationContext(frame);
         final InternalMethod method;
         // Lookup first in the metaclass as we are likely to find the method there

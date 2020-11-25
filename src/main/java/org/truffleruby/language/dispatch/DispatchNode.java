@@ -121,7 +121,6 @@ public class DispatchNode extends FrameOrStorageSendingNode {
             case "equal?":
             case "inspect":
             case "is_a?":
-            case "to_java_array":
             case "kind_of?":
             case "respond_to?":
             case "__send__":
@@ -153,7 +152,8 @@ public class DispatchNode extends FrameOrStorageSendingNode {
         if (isForeignCall.profile(metaclass == getContext().getCoreLibrary().truffleInteropForeignClass)) {
             if (checkForeign(methodName)) {
                 return callForeign(receiver, methodName, block, arguments);
-            }
+            } else
+                System.out.printf("\n================== escaped method: " + methodName + "\n");
         }
 
         if (isForeignCall.profile(metaclass == getContext().getCoreLibrary().polyglotForeignObjectClass) &&

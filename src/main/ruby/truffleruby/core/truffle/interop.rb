@@ -195,7 +195,7 @@ module Truffle
       ForeignEnumerable.new(foreign)
     end
 
-    class Foreign
+    class Foreign < Object
 
       # Currently you cannot add methods here, as method calls on this class
       # (when the object is indeed foreign) are sent as interop messages,
@@ -207,6 +207,20 @@ module Truffle
       def at(index)
         self[index]
       end
+
+      def method_missing(name, *args, &block)
+        super unless DELEGATE.include? name
+        ::Kernel.send(name, *args, &block)
+      end
+
+      def respond_to_missing?(name, include_private = false)
+        DELEGATE.include?(name) or super
+      end
+
+      def puts
+        self.to_s
+      end
+
     end
 
     def self.java_array(*array)

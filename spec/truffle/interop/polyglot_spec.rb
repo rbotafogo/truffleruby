@@ -22,6 +22,18 @@ describe Polyglot do
        foreign = Truffle::Interop.to_java_array([1, 2, 3])
        foreign.at(0).should == 1
     end
+
+    it "should access Kernel methods" do
+       foreign = Truffle::Interop.to_java_array([1, 2, 3])
+       foreign.puts.should == [1, 2, 3]
+    end
+
+=begin
+    it "should be able to send polyglot messages to foreign" do
+       foreign = Truffle::Interop.to_java_array([1, 2, 3])
+       foreign.polyglot_has_array_elements?.should == true
+    end
+=end
   end
 
   describe ".eval(id, code)" do
