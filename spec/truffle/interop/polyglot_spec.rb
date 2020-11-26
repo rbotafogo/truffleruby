@@ -7,10 +7,15 @@
 # GNU Lesser General Public License version 2.1.
 
 require_relative '../../ruby/spec_helper'
+require_relative 'fixtures/classes.rb'
 
 describe Polyglot do
 
   describe "Access to ForeignObject" do
+    proxy = -> obj {
+      logger = TruffleInteropSpecs::Logger.new
+      return Truffle::Interop.proxy_foreign_object(obj, logger), obj, logger
+    }
 
     it "class ForeignObject should be created" do
       foreign = Truffle::Interop.to_java_array([1, 2, 3])
@@ -25,15 +30,35 @@ describe Polyglot do
 
     it "should access Kernel methods" do
        foreign = Truffle::Interop.to_java_array([1, 2, 3])
-       foreign.puts.should == [1, 2, 3]
+       foreign.to_s.should == "#<Java [1, 2, 3]>"
     end
 
-=begin
-    it "should be able to send polyglot messages to foreign" do
-       foreign = Truffle::Interop.to_java_array([1, 2, 3])
-       foreign.polyglot_has_array_elements?.should == true
+    it "returns true for a directly matching Java object and interface" do
+      skip
+      big_integer_class = Truffle::Interop.java_type("java.math.BigInteger")
+      big_integer = big_integer_class.new("14")
+      puts big_integer
+      # big_integer.should == 14
+      # serializable_interface = Truffle::Interop.java_type("java.io.Serializable")
+      # big_integer.is_a?(serializable_interface).should be_true
     end
-=end
+
+    it "should do something right" do
+      pfo, pm, l = proxy[TruffleInteropSpecs::PolyglotMember.new]
+      puts pfo
+      puts pm
+      puts l
+      pfo.foo = :bar
+      pfo.foo.should == :bar
+    end
+
+
+    it "should be able to send polyglot messages to foreign" do
+      skip
+      foreign = Truffle::Interop.to_java_array([1, 2, 3])
+      foreign.polyglot_has_array_elements?.should == true
+    end
+
   end
 
   describe ".eval(id, code)" do

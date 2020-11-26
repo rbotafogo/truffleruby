@@ -96,7 +96,7 @@ public abstract class LookupMethodNode extends RubyBaseNode {
 
         // Actual lookup
         if (foreignProfile.profile(metaClass == context.getCoreLibrary().truffleInteropForeignClass)) {
-            if (checkForeign(name)) {
+            if (isForeignMethod(name)) {
                 return null;
             }
         }
@@ -156,7 +156,7 @@ public abstract class LookupMethodNode extends RubyBaseNode {
         return method;
     }
 
-    private static boolean checkForeign(String methodName) {
+    private static boolean isForeignMethod(String methodName) {
         switch (methodName) {
             case "call":
             case "bind":
@@ -166,12 +166,24 @@ public abstract class LookupMethodNode extends RubyBaseNode {
             case "equal?":
             case "inspect":
             case "is_a?":
-            case "to_java_array":
             case "kind_of?":
             case "respond_to?":
             case "__send__":
             case "to_ary":
             case "object_id":
+            case "new":
+            case "__id__":
+            case "to_a":
+            case "to_f":
+            case "to_str":
+            case "to_i":
+            case "class":
+            case "==":
+            case "[]=":
+            case "getName":
+            case "delete":
+            case "size":
+            case "keys":
                 return true;
             default:
                 return false;
@@ -183,7 +195,7 @@ public abstract class LookupMethodNode extends RubyBaseNode {
         CompilerAsserts.neverPartOfCompilation("slow-path method lookup should not be compiled");
 
         if (metaClass == context.getCoreLibrary().truffleInteropForeignClass) {
-            if (checkForeign(name)) {
+            if (isForeignMethod(name)) {
                 return new MethodLookupResult(null);
             }
         }

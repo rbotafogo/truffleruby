@@ -111,7 +111,7 @@ public class DispatchNode extends FrameOrStorageSendingNode {
                 BranchProfile.create());
     }
 
-    private static boolean checkForeign(String methodName) {
+    private static boolean isForeignMethod(String methodName) {
         switch (methodName) {
             case "call":
             case "bind":
@@ -126,6 +126,19 @@ public class DispatchNode extends FrameOrStorageSendingNode {
             case "__send__":
             case "to_ary":
             case "object_id":
+            case "new":
+            case "__id__":
+            case "to_a":
+            case "to_f":
+            case "to_str":
+            case "to_i":
+            case "class":
+            case "==":
+            case "[]=":
+            case "getName":
+            case "delete":
+            case "size":
+            case "keys":
                 return true;
             default:
                 return false;
@@ -150,14 +163,14 @@ public class DispatchNode extends FrameOrStorageSendingNode {
         boolean print_val = false;
 
         if (isForeignCall.profile(metaclass == getContext().getCoreLibrary().truffleInteropForeignClass)) {
-            if (checkForeign(methodName)) {
+            if (isForeignMethod(methodName)) {
                 return callForeign(receiver, methodName, block, arguments);
             } else
                 System.out.printf("\n================== escaped method: " + methodName + "\n");
         }
 
         if (isForeignCall.profile(metaclass == getContext().getCoreLibrary().polyglotForeignObjectClass) &&
-            checkForeign(methodName)) {
+            isForeignMethod(methodName)) {
             System.out.printf("\n=====================method " + methodName + "\n");
             return callForeign(receiver, methodName, block, arguments);
         }

@@ -196,7 +196,7 @@ module Truffle
     end
 
     class Foreign < Object
-
+      attr_writer :polyglot_members
       # Currently you cannot add methods here, as method calls on this class
       # (when the object is indeed foreign) are sent as interop messages,
       # rather than looking them up in the class.
@@ -204,21 +204,37 @@ module Truffle
         "hello from polyglot"
       end
 
+      def new(*args)
+        puts "\n==============new called with #{args}==============="
+        puts self
+        puts self.class
+        puts self.foreign_class
+        # self.foreign_class.new(*args)
+      end
+
       def at(index)
         self[index]
       end
 
-      def method_missing(name, *args, &block)
-        super unless DELEGATE.include? name
-        ::Kernel.send(name, *args, &block)
+      def method_missing(method, *args, &block)
+
+        case method
+        # when missing method has an '=' sign in it...
+        when ->(x) { x =~ /(.*)=$/ }
+          @polyglot_members ||= Truffle::Interop.hash_keys_as_members({})
+          @polyglot_members.send(polyglot_write_member, $1, *args)
+          # Truffle::Interop.polyglot_write_member($1, *args)
+          # R::Support.set_symbol($1, *args)
+        else
+        end
       end
 
-      def respond_to_missing?(name, include_private = false)
-        DELEGATE.include?(name) or super
-      end
-
-      def puts
+      def to_s
         self.to_s
+      end
+
+      def to_a
+        Truffle::Interop.to_array(self)
       end
 
     end
