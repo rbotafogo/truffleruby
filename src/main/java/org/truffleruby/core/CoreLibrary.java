@@ -361,7 +361,6 @@ public class CoreLibrary {
         typeErrorClass = defineClass(standardErrorClass, "TypeError");
         zeroDivisionErrorClass = defineClass(standardErrorClass, "ZeroDivisionError");
         polyglotModule = defineModule("Polyglot");
-        polyglotForeignObjectClass = defineClass(polyglotModule, objectClass, "ForeignObject");
         unsupportedMessageErrorClass = defineClass(polyglotModule, standardErrorClass, "UnsupportedMessageError");
         polyglotForeignObjectClass = defineClass(polyglotModule, objectClass, "ForeignObject");
 

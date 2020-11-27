@@ -78,7 +78,6 @@ public abstract class LookupMethodNode extends RubyBaseNode {
             case "delete":
             case "size":
             case "keys":
-            case "array_size":
                 return true;
             default:
                 return false;
