@@ -111,6 +111,10 @@ module Polyglot
       Truffle::Interop.write_member(self, member, value)
     end
 
+    def method_missing(method, *args, &block)
+    end
+
+=begin
     # TODO: This method is incomplete and only works in one
     # specific case.
     def method_missing(method, *args, &block)
@@ -126,8 +130,9 @@ module Polyglot
         Truffle::Interop.read_member(self, method).to_sym
       end
     end
-  end
+=end
 
+  end
 end
 
 module Java
