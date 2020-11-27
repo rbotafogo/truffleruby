@@ -50,6 +50,41 @@ public abstract class LookupMethodNode extends RubyBaseNode {
     public abstract InternalMethod execute(Frame frame, RubyClass metaClass, String name,
             DispatchConfiguration config);
 
+    public static boolean isForeignMethod(String methodName) {
+        switch (methodName) {
+            case "call":
+            case "bind":
+            case "nil?":
+            case "[]":
+            case "to_s":
+            case "equal?":
+            case "inspect":
+            case "is_a?":
+            case "kind_of?":
+            case "respond_to?":
+            case "__send__":
+            case "to_ary":
+            case "object_id":
+            case "new":
+            case "__id__":
+            case "to_a":
+            case "to_f":
+            case "to_str":
+            case "to_i":
+            case "class":
+            case "==":
+            case "[]=":
+            case "getName":
+            case "delete":
+            case "size":
+            case "keys":
+            case "array_size":
+                return true;
+            default:
+                return false;
+        }
+    }
+
     @Specialization(
             guards = {
                     "metaClass == cachedMetaClass",
@@ -95,7 +130,7 @@ public abstract class LookupMethodNode extends RubyBaseNode {
         assert this != LookupMethodNodeGen.getUncached() || frame == null;
 
         // Actual lookup
-        if (foreignProfile.profile(metaClass == context.getCoreLibrary().truffleInteropForeignClass)) {
+        if (foreignProfile.profile(metaClass == context.getCoreLibrary().polyglotForeignObjectClass)) {
             if (isForeignMethod(name)) {
                 return null;
             }
@@ -156,45 +191,11 @@ public abstract class LookupMethodNode extends RubyBaseNode {
         return method;
     }
 
-    private static boolean isForeignMethod(String methodName) {
-        switch (methodName) {
-            case "call":
-            case "bind":
-            case "nil?":
-            case "[]":
-            case "to_s":
-            case "equal?":
-            case "inspect":
-            case "is_a?":
-            case "kind_of?":
-            case "respond_to?":
-            case "__send__":
-            case "to_ary":
-            case "object_id":
-            case "new":
-            case "__id__":
-            case "to_a":
-            case "to_f":
-            case "to_str":
-            case "to_i":
-            case "class":
-            case "==":
-            case "[]=":
-            case "getName":
-            case "delete":
-            case "size":
-            case "keys":
-                return true;
-            default:
-                return false;
-        }
-    }
-
     protected static MethodLookupResult lookupCached(RubyContext context, Frame callingFrame,
             RubyClass metaClass, String name, DispatchConfiguration config) {
         CompilerAsserts.neverPartOfCompilation("slow-path method lookup should not be compiled");
 
-        if (metaClass == context.getCoreLibrary().truffleInteropForeignClass) {
+        if (metaClass == context.getCoreLibrary().polyglotForeignObjectClass) {
             if (isForeignMethod(name)) {
                 return new MethodLookupResult(null);
             }

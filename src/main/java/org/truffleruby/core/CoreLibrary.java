@@ -901,7 +901,8 @@ public class CoreLibrary {
             return floatClass;
         } else {
             assert RubyGuards.isForeignObject(object);
-            return truffleInteropForeignClass;
+            // return truffleInteropForeignClass;
+            return polyglotForeignObjectClass;
         }
     }
 

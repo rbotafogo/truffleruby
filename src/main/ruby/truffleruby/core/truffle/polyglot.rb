@@ -40,9 +40,91 @@ module Polyglot
     Polyglot::ForeignObject.new
   end
 
+  module HasArrayElementsTrait
+
+    def size
+      Truffle::Interop.array_size(self)
+    end
+
+    alias_method :length, :size
+    alias_method :count, :size
+
+    def read_array_element(index)
+      Truffle::Interop.read_array_element(self, index)
+    end
+
+    def at(index)
+      index += length if index < 0
+      return nil if (index < 0 || index >= length)
+      read_array_element(index)
+    end
+
+    def first
+      read_array_element(0)
+    end
+
+    def last
+      read_array_element(length - 1)
+    end
+
+    def each(*args)
+      return enum_for(:each) unless block_given?
+      i = 0
+      while i < length
+        yield read_array_element(i)
+        i += 1
+      end
+    end
+
+    def each_with_index
+      return enum_for(:each) unless block_given?
+      i = 0
+      while i < length
+        yield read_array_element(i), i
+        i += 1
+      end
+    end
+
+  end
+
   class ForeignObject
-    def hello
-      "hello from polyglot"
+    include HasArrayElementsTrait
+    include Enumerable
+
+    def has_array_elements?
+      Truffle::Interop.has_array_elements?(self)
+    end
+
+    def read_member(name)
+      Truffle::Interop.member(self, name)
+    end
+
+    def get_members(include_internal = false)
+      Truffle::Interop.members(self, include_internal)
+    end
+
+    def inspect
+      Truffle::Interop.foreign_inspect(self)
+    end
+
+    def []=(member, value)
+      Truffle::Interop.write_member(self, member, value)
+    end
+
+    # TODO: This method is incomplete and only works in one
+    # specific case.
+    def method_missing(method, *args, &block)
+      case method
+      # when missing method has an '=' sign in it...
+      when ->(x) { x =~ /(.*)=$/ }
+        if args[0].is_a? Symbol
+          Truffle::Interop.write_member(self, $1, args[0])
+        else
+          raise ArgumentError("Illegal number of arguments for #{method}")
+        end
+      else
+        Truffle::Interop.read_member(self, method).to_sym
+      end
     end
   end
 

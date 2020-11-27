@@ -111,40 +111,6 @@ public class DispatchNode extends FrameOrStorageSendingNode {
                 BranchProfile.create());
     }
 
-    private static boolean isForeignMethod(String methodName) {
-        switch (methodName) {
-            case "call":
-            case "bind":
-            case "nil?":
-            case "[]":
-            case "to_s":
-            case "equal?":
-            case "inspect":
-            case "is_a?":
-            case "kind_of?":
-            case "respond_to?":
-            case "__send__":
-            case "to_ary":
-            case "object_id":
-            case "new":
-            case "__id__":
-            case "to_a":
-            case "to_f":
-            case "to_str":
-            case "to_i":
-            case "class":
-            case "==":
-            case "[]=":
-            case "getName":
-            case "delete":
-            case "size":
-            case "keys":
-                return true;
-            default:
-                return false;
-        }
-    }
-
     public Object call(Object receiver, String method, Object... arguments) {
         return execute(null, receiver, method, null, arguments);
     }
@@ -162,16 +128,8 @@ public class DispatchNode extends FrameOrStorageSendingNode {
         final RubyClass metaclass = metaclassNode.execute(receiver);
         boolean print_val = false;
 
-        if (isForeignCall.profile(metaclass == getContext().getCoreLibrary().truffleInteropForeignClass)) {
-            if (isForeignMethod(methodName)) {
-                return callForeign(receiver, methodName, block, arguments);
-            } else
-                System.out.printf("\n================== escaped method: " + methodName + "\n");
-        }
-
         if (isForeignCall.profile(metaclass == getContext().getCoreLibrary().polyglotForeignObjectClass) &&
-            isForeignMethod(methodName)) {
-            System.out.printf("\n=====================method " + methodName + "\n");
+                (LookupMethodNode.isForeignMethod(methodName))) {
             return callForeign(receiver, methodName, block, arguments);
         }
 

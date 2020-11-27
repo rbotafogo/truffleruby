@@ -87,8 +87,8 @@ public abstract class LogicalClassNode extends RubyBaseNode {
     @Specialization(guards = "isForeignObject(object)")
     protected RubyClass logicalClassForeign(Object object,
             @CachedContext(RubyLanguage.class) RubyContext context) {
-        return context.getCoreLibrary().truffleInteropForeignClass;
-        // return context.getCoreLibrary().polyglotForeignObjectClass;
+        // return context.getCoreLibrary().truffleInteropForeignClass;
+        return context.getCoreLibrary().polyglotForeignObjectClass;
     }
 
     protected int getCacheLimit() {

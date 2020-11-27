@@ -195,48 +195,10 @@ module Truffle
       ForeignEnumerable.new(foreign)
     end
 
-    class Foreign < Object
-      attr_writer :polyglot_members
+    class Foreign
       # Currently you cannot add methods here, as method calls on this class
       # (when the object is indeed foreign) are sent as interop messages,
       # rather than looking them up in the class.
-      def hello
-        "hello from polyglot"
-      end
-
-      def new(*args)
-        puts "\n==============new called with #{args}==============="
-        puts self
-        puts self.class
-        puts self.foreign_class
-        # self.foreign_class.new(*args)
-      end
-
-      def at(index)
-        self[index]
-      end
-
-      def method_missing(method, *args, &block)
-
-        case method
-        # when missing method has an '=' sign in it...
-        when ->(x) { x =~ /(.*)=$/ }
-          @polyglot_members ||= Truffle::Interop.hash_keys_as_members({})
-          @polyglot_members.send(polyglot_write_member, $1, *args)
-          # Truffle::Interop.polyglot_write_member($1, *args)
-          # R::Support.set_symbol($1, *args)
-        else
-        end
-      end
-
-      def to_s
-        self.to_s
-      end
-
-      def to_a
-        Truffle::Interop.to_array(self)
-      end
-
     end
 
     def self.java_array(*array)
