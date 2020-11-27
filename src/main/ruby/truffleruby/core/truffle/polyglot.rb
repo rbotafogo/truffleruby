@@ -8,8 +8,6 @@
 # GNU General Public License version 2, or
 # GNU Lesser General Public License version 2.1.
 
-Polyglot::MAIN = self
-
 module Polyglot
 
   # stub defined in CoreLibrary
@@ -34,10 +32,6 @@ module Polyglot
 
   def self.as_enumerable(object)
     Truffle::Interop.enumerable(object)
-  end
-
-  def self.foreign_object
-    Polyglot::ForeignObject.new
   end
 
   module HasArrayElementsTrait

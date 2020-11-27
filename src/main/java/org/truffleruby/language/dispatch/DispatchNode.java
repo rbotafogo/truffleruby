@@ -126,7 +126,6 @@ public class DispatchNode extends FrameOrStorageSendingNode {
     public Object execute(VirtualFrame frame, Object receiver, String methodName, RubyProc block, Object[] arguments) {
 
         final RubyClass metaclass = metaclassNode.execute(receiver);
-        boolean print_val = false;
 
         if (isForeignCall.profile(metaclass == getContext().getCoreLibrary().polyglotForeignObjectClass) &&
                 (LookupMethodNode.isForeignMethod(methodName))) {

@@ -14,23 +14,6 @@ Truffle::Interop::MAIN = self
 module Truffle
   module Interop
 
-    class Foreign
-      def initialize(*args)
-        super(args)
-      end
-
-      # Currently you cannot add methods here, as method calls on this class
-      # (when the object is indeed foreign) are sent as interop messages,
-      # rather than looking them up in the class.
-      def hello
-        "hello from interop"
-      end
-
-      def method_missing(*args)
-        "I'm doing a method missing"
-      end
-    end
-
     # stubs, defined in CoreLibrary
     # rubocop:disable Lint/InheritException
     class InteropException < Exception; end
@@ -210,6 +193,14 @@ module Truffle
 
     def self.enumerable(foreign)
       ForeignEnumerable.new(foreign)
+    end
+
+    class Foreign
+
+      # Currently you cannot add methods here, as method calls on this class
+      # (when the object is indeed foreign) are sent as interop messages,
+      # rather than looking them up in the class.
+
     end
 
     def self.java_array(*array)
