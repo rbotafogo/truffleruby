@@ -196,9 +196,11 @@ module Truffle
     end
 
     class Foreign
+
       # Currently you cannot add methods here, as method calls on this class
       # (when the object is indeed foreign) are sent as interop messages,
       # rather than looking them up in the class.
+
     end
 
     def self.java_array(*array)
