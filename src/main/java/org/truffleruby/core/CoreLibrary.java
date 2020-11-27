@@ -363,6 +363,7 @@ public class CoreLibrary {
         polyglotModule = defineModule("Polyglot");
         polyglotForeignObjectClass = defineClass(polyglotModule, objectClass, "ForeignObject");
         unsupportedMessageErrorClass = defineClass(polyglotModule, standardErrorClass, "UnsupportedMessageError");
+        polyglotForeignObjectClass = defineClass(polyglotModule, objectClass, "ForeignObject");
 
         // StandardError > RuntimeError
         runtimeErrorClass = defineClass(standardErrorClass, "RuntimeError");
@@ -901,7 +902,8 @@ public class CoreLibrary {
             return floatClass;
         } else {
             assert RubyGuards.isForeignObject(object);
-            return truffleInteropForeignClass;
+            // return truffleInteropForeignClass;
+            return polyglotForeignObjectClass;
         }
     }
 

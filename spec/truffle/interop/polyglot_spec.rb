@@ -7,8 +7,89 @@
 # GNU Lesser General Public License version 2.1.
 
 require_relative '../../ruby/spec_helper'
+require_relative 'fixtures/classes.rb'
 
 describe Polyglot do
+
+  describe "Access to foreign array as ForeignObject" do
+    proxy = -> obj {
+      logger = TruffleInteropSpecs::Logger.new
+      return Truffle::Interop.proxy_foreign_object(obj, logger), obj, logger
+    }
+
+    before do
+      @foreign = Truffle::Interop.to_java_array([1, 2, 3])
+      @foreign_db = Truffle::Interop.to_java_array([1.4, 2.8, 3.6])
+    end
+
+    it "should create a ForeignObject class" do
+      @foreign.has_array_elements?.should == true
+      @foreign.inspect.should =~ /\A#<Java int\[\]:0x\h+ \[1, 2, 3\]>/
+      @foreign.length.should == 3
+    end
+
+    it "should index array with #[]" do
+       @foreign[0].should == 1
+       @foreign[1].should == 2
+       @foreign[2].should == 3
+    end
+
+    it "should index array with #at" do
+       @foreign.at(0).should == 1
+       @foreign.at(1).should == 2
+       @foreign.at(3).should == nil
+    end
+
+    it "should access the first and last elements with #first and #last" do
+     @foreign.first.should == 1
+     @foreign.last.should == 3
+    end
+
+    it "can call each on the foreign array" do
+      @foreign.each_with_index do |val, index|
+        @foreign[index].should == val
+      end
+    end
+
+    it "can receive an enumerator from a @foreign array with #each with no block given" do
+      enum = @foreign.each
+      enum.class.should == Enumerator
+      enum.each_with_index do |val, index|
+        @foreign[index].should == val
+      end
+    end
+
+    it "should allow the use of #take" do
+      slice = @foreign.take(2)
+      slice[0].should == 1
+      slice[1].should == 2
+      slice.at(2).should == nil
+    end
+
+    it "should allow looking at members" do
+      members = @foreign.get_members(true)
+      members.should include("wait")
+    end
+
+    it "should allow the use of #next" do
+      skip
+      # NOT WORKING: enum.next says that the iteration reached an end
+      enum = @foreign_db.each
+      enum.class.should == Enumerator
+      puts enum.next
+    end
+
+    it "returns true for a directly matching Java object and interface" do
+      skip
+      big_integer_class = Truffle::Interop.java_type("java.math.BigInteger")
+      big_integer = big_integer_class.new("14")
+      puts big_integer
+      # big_integer.should == 14
+      # serializable_interface = Truffle::Interop.java_type("java.io.Serializable")
+      # big_integer.is_a?(serializable_interface).should be_true
+    end
+
+  end
 
   describe ".eval(id, code)" do
 

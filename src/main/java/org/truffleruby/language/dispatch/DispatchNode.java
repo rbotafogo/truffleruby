@@ -123,47 +123,14 @@ public class DispatchNode extends FrameOrStorageSendingNode {
         return execute(frame, receiver, methodName, block, arguments);
     }
 
-    private boolean checkForeign(String methodName) {
-        switch (methodName) {
-            case "call":
-            case "bind":
-            case "nil?":
-            case "[]":
-            case "to_s":
-            case "equal?":
-            case "inspect":
-            case "is_a?":
-            case "to_java_array":
-            case "kind_of?":
-            case "respond_to?":
-            case "__send__":
-            case "to_ary":
-            case "object_id":
-                return true;
-            default:
-                return false;
-        }
-    }
-
     public Object execute(VirtualFrame frame, Object receiver, String methodName, RubyProc block, Object[] arguments) {
 
         final RubyClass metaclass = metaclassNode.execute(receiver);
-/*
-        if (isForeignCall.profile(metaclass == getContext().getCoreLibrary().truffleInteropForeignClass) &&
-                checkForeign(methodName)) {
-            // System.out.printf(methodName + "\n");
-            return callForeign(receiver, methodName, block, arguments);
-        }
-*/
+        boolean print_val = false;
 
-        if (isForeignCall.profile(metaclass == getContext().getCoreLibrary().truffleInteropForeignClass)) {
-            if (checkForeign(methodName)) {
-                System.out.printf("\nExternal method: " + receiver + " " + methodName);
-                return callForeign(receiver, methodName, block, arguments);
-            } else {
-                System.out.printf("\nRuby method: " + receiver + " " + methodName);
-                // return callForeign(receiver, methodName, block, arguments);
-            }
+        if (isForeignCall.profile(metaclass == getContext().getCoreLibrary().polyglotForeignObjectClass) &&
+                (LookupMethodNode.isForeignMethod(methodName))) {
+            return callForeign(receiver, methodName, block, arguments);
         }
 
         final InternalMethod method = methodLookup.execute(frame, metaclass, methodName, config);
