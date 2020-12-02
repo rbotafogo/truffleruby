@@ -71,6 +71,11 @@ describe Polyglot do
       members.should include("wait")
     end
 
+    it "should allow assignment of array element with #[]=" do
+      @foreign[2] = 10
+      @foreign[2].should == 10
+    end
+
     it "should allow the use of #next" do
       skip
       # NOT WORKING: enum.next says that the iteration reached an end
@@ -79,16 +84,17 @@ describe Polyglot do
       puts enum.next
     end
 
-    it "returns true for a directly matching Java object and interface" do
-      skip
-      big_integer_class = Truffle::Interop.java_type("java.math.BigInteger")
-      big_integer = big_integer_class.new("14")
-      puts big_integer
-      # big_integer.should == 14
-      # serializable_interface = Truffle::Interop.java_type("java.io.Serializable")
-      # big_integer.is_a?(serializable_interface).should be_true
+    it "should count objects in the array" do
+      foreign = Truffle::Interop.to_java_array([1, 2, 4, 2])
+      foreign.count.should == 4
+      foreign.count(2).should == 2
+      foreign.count { |x| x % 2 == 0}.should == 3
     end
 
+    it "should allow the creation of a foreign hash map" do
+      object = Object.new
+      Truffle::Interop.has_members?(object).should == true
+    end
   end
 
   describe ".eval(id, code)" do

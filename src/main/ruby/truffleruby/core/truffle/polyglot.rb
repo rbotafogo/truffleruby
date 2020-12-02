@@ -34,6 +34,7 @@ module Polyglot
     Truffle::Interop.enumerable(object)
   end
 
+  # HasArrayElementsTrait
   module HasArrayElementsTrait
 
     def size
@@ -41,7 +42,30 @@ module Polyglot
     end
 
     alias_method :length, :size
-    alias_method :count, :size
+    
+    def count(item = nil)
+      seq = 0
+      if (!item.nil?)
+        each { |o| seq += 1 if item == o }
+      elsif block_given?
+        each { |o| seq += 1 if yield(o) }
+      else
+        return size
+      end
+      seq
+    end
+
+    def to_array
+      if Truffle::Interop.has_array_elements?(self)
+        Truffle::Interop.to_array(self)
+      else
+        raise RuntimeError.new
+      end
+    end
+
+    alias_method :to_a, :to_array
+    alias_method :to_ary, :to_array
+    alias_method :toArray, :to_array
 
     def read_array_element(index)
       Truffle::Interop.read_array_element(self, index)
@@ -81,50 +105,142 @@ module Polyglot
 
   end
 
+  # ForeignObject class
   class ForeignObject
-    include HasArrayElementsTrait
     include Enumerable
+    include HasArrayElementsTrait
+
+    def foreign_class
+      Truffle::Interop.foreign_class(self)
+    end
+
+    alias_method :class, :foreign_class
+    alias_method :getClass, :foreign_class
+
+    def foreign_is_a?(klass)
+      Truffle::Interop.foreign_is_a?(self, klass)
+    end
+
+    alias_method :kind_of?, :foreign_is_a?
+    alias_method :is_a?, :foreign_is_a?
+
+    def foreign_to_str
+      Truffle::Interop.foreign_to_str(self)
+    end
+
+    alias_method :to_str, :foreign_to_str
+
+    def foreign_to_s
+      Truffle::Interop.foreign_to_s(self)
+    end
+
+    alias_method :to_s, :foreign_to_s
+
+    def put(*args)
+      args.join(", ")
+    end
+
+    def name
+      Truffle::Interop.invoke(self, :getName)
+    end
+
+    def intValue
+      Truffle::Interop.invoke(self, :intValue)
+    end
+
+    def longValue
+      Truffle::Interop.invoke(self, :longValue)
+    end
+
+    alias_method :getName, :name
+
+    def as_int
+      Truffle::Interop.as_int(self)
+    end
+
+    def as_long
+      Truffle::Interop.as_long(self)
+    end
+
+    def as_double
+      Truffle::Interop.as_double(self)
+    end
+
+    alias_method :doubleValue, :as_double
+
+    def to_i
+      return as_int if Truffle::Interop.fits_in_int?(self)
+      return as_long if Truffle::Interop.fits_in_long?(self)
+      raise TypeError.new("can't convert foreign object to Integer")
+    end
+
+    def to_f
+      return as_double if Truffle::Interop.fits_in_double?(self)
+      return as_long if Truffle::Interop.fits_in_long?(self)
+      raise TypeError.new("can't convert foreign object to Integer")
+    end
+
+    def unbox
+      Truffle::Interop.unbox(self)
+    end
 
     def has_array_elements?
       Truffle::Interop.has_array_elements?(self)
-    end
-
-    def read_member(name)
-      Truffle::Interop.member(self, name)
     end
 
     def get_members(include_internal = false)
       Truffle::Interop.members(self, include_internal)
     end
 
+    alias_method :members, :get_members
+    alias_method :keys, :get_members
+
     def inspect
       Truffle::Interop.foreign_inspect(self)
     end
 
+    def java_class?(klass)
+      Truffle::Interop.java_class?(klass)
+    end
+
     def []=(member, value)
+      return Truffle::Interop.write_array_element(self, member, value) if member.is_a? Numeric
       Truffle::Interop.write_member(self, member, value)
     end
 
-    def method_missing(method, *args, &block)
+    def delete(index)
+      Truffle::Interop.remove_array_element(self, index) if index.is_a? Numeric
+      Truffle::Interop.remove_member(self, index)
     end
 
-=begin
     # TODO: This method is incomplete and only works in one
     # specific case.
     def method_missing(method, *args, &block)
+      args << block if block_given?
+
       case method
       # when missing method has an '=' sign in it...
       when ->(x) { x =~ /(.*)=$/ }
-        if args[0].is_a? Symbol
-          Truffle::Interop.write_member(self, $1, args[0])
-        else
-          raise ArgumentError("Illegal number of arguments for #{method}")
-        end
+        Truffle::Interop.write_member(self, $1, *args)
       else
-        Truffle::Interop.read_member(self, method).to_sym
+        if (Truffle::Interop.is_member_invocable?(self, method))
+          Truffle::Interop.invoke(self, method, *args)
+        else
+          if (args.size > 0)
+            # Since it is not invocable, then there is no reason to invoke the method with the block_given
+            # arguments, but special_forms_spec at line 173 specifies that the call should be made.  Seems
+            # like a wrong spec and probably the spec should be changed
+            begin
+              Truffle::Interop.invoke(self, method, *args)
+            rescue
+              raise NoMethodError.new
+            end
+          else
+            Truffle::Interop.read_member(self, method)
+          end
+        end
       end
     end
-=end
 
   end
 end

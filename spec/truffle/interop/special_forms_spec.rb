@@ -90,6 +90,8 @@ describe "Interop special forms" do
   it description['.name = value', :writeMember, [:name, :value]] do
     pfo, pm, l = proxy[TruffleInteropSpecs::PolyglotMember.new]
     pfo.foo = :bar
+    # The member that is written here is 'bar' and not ':bar'. Reading pfo.foo will
+    # give us 'bar'. I think the correct spec should be ... include(['writeMember'], 'foo', 'bar')
     l.log.should include(['writeMember', 'foo', :bar])
     pm.log.should include([:polyglot_write_member, "foo", :bar])
   end
@@ -206,7 +208,7 @@ describe "Interop special forms" do
 
   it doc['.inspect', 'returns a Ruby-style `#inspect` string showing members, array elements, etc'] do
     # More detailed specs in spec/truffle/interop/foreign_inspect_to_s_spec.rb
-    Truffle::Debug.foreign_object.inspect.should =~ /\A#<Foreign:0x\h+>\z/
+    Truffle::Debug.foreign_object.inspect.should =~ /\A#<Foreign Polyglot::ForeignObject:0x\h+>\z/
   end
 
   it description['.to_s', :asString, [], 'when `isString(foreign_object)` is true'] do

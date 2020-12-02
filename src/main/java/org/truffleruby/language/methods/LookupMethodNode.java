@@ -56,28 +56,14 @@ public abstract class LookupMethodNode extends RubyBaseNode {
             case "bind":
             case "nil?":
             case "[]":
-            case "to_s":
             case "equal?":
             case "inspect":
-            case "is_a?":
-            case "kind_of?":
             case "respond_to?":
             case "__send__":
-            case "to_ary":
             case "object_id":
             case "new":
             case "__id__":
-            case "to_a":
-            case "to_f":
-            case "to_str":
-            case "to_i":
-            case "class":
             case "==":
-            case "[]=":
-            case "getName":
-            case "delete":
-            case "size":
-            case "keys":
                 return true;
             default:
                 return false;
