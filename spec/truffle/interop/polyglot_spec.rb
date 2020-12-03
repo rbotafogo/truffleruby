@@ -23,7 +23,6 @@ describe Polyglot do
     end
 
     it "should create a ForeignObject class" do
-      @foreign.has_array_elements?.should == true
       @foreign.inspect.should =~ /\A#<Java int\[\]:0x\h+ \[1, 2, 3\]>/
       @foreign.length.should == 3
     end
@@ -64,11 +63,6 @@ describe Polyglot do
       slice[0].should == 1
       slice[1].should == 2
       slice.at(2).should == nil
-    end
-
-    it "should allow looking at members" do
-      members = @foreign.get_members(true)
-      members.should include("wait")
     end
 
     it "should allow assignment of array element with #[]=" do

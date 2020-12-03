@@ -194,7 +194,6 @@ public class CoreLibrary {
     public final RubyModule truffleBootModule;
     public final RubyModule truffleExceptionOperationsModule;
     public final RubyModule truffleInteropModule;
-    public final RubyClass truffleInteropForeignClass;
     public final RubyClass unsupportedMessageExceptionClass;
     public final RubyClass invalidArrayIndexExceptionClass;
     public final RubyClass unknownIdentifierExceptionClass;
@@ -494,7 +493,6 @@ public class CoreLibrary {
         graalErrorClass = defineClass(truffleModule, exceptionClass, "GraalError");
         truffleExceptionOperationsModule = defineModule(truffleModule, "ExceptionOperations");
         truffleInteropModule = defineModule(truffleModule, "Interop");
-        truffleInteropForeignClass = defineClass(truffleInteropModule, objectClass, "Foreign");
         RubyClass interopExceptionClass = defineClass(
                 truffleInteropModule,
                 exceptionClass,
@@ -901,7 +899,6 @@ public class CoreLibrary {
             return floatClass;
         } else {
             assert RubyGuards.isForeignObject(object);
-            // return truffleInteropForeignClass;
             return polyglotForeignObjectClass;
         }
     }

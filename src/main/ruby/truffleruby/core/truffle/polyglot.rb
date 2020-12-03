@@ -114,12 +114,35 @@ module Polyglot
     include Enumerable
     include HasArrayElementsTrait
 
-    def foreign_class
+    def getClass
       Truffle::Interop.foreign_class(self)
     end
 
-    alias_method :class, :foreign_class
-    alias_method :getClass, :foreign_class
+    alias_method :class, :getClass
+
+    def getName
+      Truffle::Interop.invoke(self, :getName)
+    end
+
+    def intValue
+      Truffle::Interop.invoke(self, :intValue)
+    end
+
+    def longValue
+      Truffle::Interop.invoke(self, :longValue)
+    end
+
+    def doubleValue
+      Truffle::Interop.as_double(self)
+    end
+
+    def inspect
+      Truffle::Interop.foreign_inspect(self)
+    end
+
+    def java_class?(klass)
+      Truffle::Interop.java_class?(klass)
+    end
 
     def is_a?(klass)
       Truffle::Interop.foreign_is_a?(self, klass)
@@ -139,67 +162,20 @@ module Polyglot
       Truffle::Interop.foreign_to_s(self)
     end
 
-    def name
-      Truffle::Interop.invoke(self, :getName)
-    end
-
-    def intValue
-      Truffle::Interop.invoke(self, :intValue)
-    end
-
-    def longValue
-      Truffle::Interop.invoke(self, :longValue)
-    end
-
-    alias_method :getName, :name
-
-    def as_int
-      Truffle::Interop.as_int(self)
-    end
-
-    def as_long
-      Truffle::Interop.as_long(self)
-    end
-
-    def as_double
-      Truffle::Interop.as_double(self)
-    end
-
-    alias_method :doubleValue, :as_double
-
     def to_i
-      return as_int if Truffle::Interop.fits_in_int?(self)
-      return as_long if Truffle::Interop.fits_in_long?(self)
+      return Truffle::Interop.as_int(self) if Truffle::Interop.fits_in_int?(self)
+      return Truffle::Interop.as_long(self) if Truffle::Interop.fits_in_long?(self)
       raise TypeError.new("can't convert foreign object to Integer")
     end
 
     def to_f
-      return as_double if Truffle::Interop.fits_in_double?(self)
-      return as_long if Truffle::Interop.fits_in_long?(self)
+      return Truffle::Interop.as_double(self) if Truffle::Interop.fits_in_double?(self)
+      return Truffle::Interop.as_long(self) if Truffle::Interop.fits_in_long?(self)
       raise TypeError.new("can't convert foreign object to Integer")
     end
 
-    def unbox
-      Truffle::Interop.unbox(self)
-    end
-
-    def has_array_elements?
-      Truffle::Interop.has_array_elements?(self)
-    end
-
-    def get_members(include_internal = false)
-      Truffle::Interop.members(self, include_internal)
-    end
-
-    alias_method :members, :get_members
-    alias_method :keys, :get_members
-
-    def inspect
-      Truffle::Interop.foreign_inspect(self)
-    end
-
-    def java_class?(klass)
-      Truffle::Interop.java_class?(klass)
+    def keys()
+      Truffle::Interop.members(self, false)
     end
 
     def []=(member, value)
