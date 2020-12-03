@@ -54,10 +54,8 @@ public abstract class LookupMethodNode extends RubyBaseNode {
         switch (methodName) {
             case "call":
             case "bind":
-            case "nil?":
             case "[]":
             case "equal?":
-            case "inspect":
             case "respond_to?":
             case "__send__":
             case "object_id":

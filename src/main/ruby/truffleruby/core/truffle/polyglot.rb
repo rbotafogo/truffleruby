@@ -42,7 +42,7 @@ module Polyglot
     end
 
     alias_method :length, :size
-    
+
     def count(item = nil)
       seq = 0
       if (!item.nil?)
@@ -55,7 +55,11 @@ module Polyglot
       seq
     end
 
-    def to_array
+    def toArray
+      Truffle::Interop.invoke(self, :toArray)
+    end
+
+    def to_a
       if Truffle::Interop.has_array_elements?(self)
         Truffle::Interop.to_array(self)
       else
@@ -63,9 +67,7 @@ module Polyglot
       end
     end
 
-    alias_method :to_a, :to_array
-    alias_method :to_ary, :to_array
-    alias_method :toArray, :to_array
+    alias_method :to_ary, :to_a
 
     def read_array_element(index)
       Truffle::Interop.read_array_element(self, index)
@@ -107,6 +109,8 @@ module Polyglot
 
   # ForeignObject class
   class ForeignObject
+    # TODO: includes should be done dynamically depending on the type of the
+    # foreign object. Not sure yet how to do it
     include Enumerable
     include HasArrayElementsTrait
 
@@ -117,27 +121,22 @@ module Polyglot
     alias_method :class, :foreign_class
     alias_method :getClass, :foreign_class
 
-    def foreign_is_a?(klass)
+    def is_a?(klass)
       Truffle::Interop.foreign_is_a?(self, klass)
     end
 
-    alias_method :kind_of?, :foreign_is_a?
-    alias_method :is_a?, :foreign_is_a?
+    alias_method :kind_of?, :is_a?
 
-    def foreign_to_str
+    def nil?
+      Truffle::Interop.null?(self)
+    end
+
+    def to_str
       Truffle::Interop.foreign_to_str(self)
     end
 
-    alias_method :to_str, :foreign_to_str
-
-    def foreign_to_s
+    def to_s
       Truffle::Interop.foreign_to_s(self)
-    end
-
-    alias_method :to_s, :foreign_to_s
-
-    def put(*args)
-      args.join(", ")
     end
 
     def name
@@ -211,6 +210,10 @@ module Polyglot
     def delete(index)
       Truffle::Interop.remove_array_element(self, index) if index.is_a? Numeric
       Truffle::Interop.remove_member(self, index)
+    end
+
+    def +(other_object)
+      Truffle::Interop.unbox_if_needed(self) + Truffle::Interop.unbox_if_needed(other_object)
     end
 
     # TODO: This method is incomplete and only works in one
