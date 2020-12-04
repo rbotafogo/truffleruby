@@ -11,6 +11,7 @@ package org.truffleruby.language.methods;
 
 import java.util.EnumSet;
 
+import com.oracle.truffle.api.dsl.CachedLanguage;
 import com.oracle.truffle.api.exception.AbstractTruffleException;
 import org.truffleruby.RubyContext;
 import org.truffleruby.RubyLanguage;
@@ -69,6 +70,7 @@ public abstract class TranslateExceptionNode extends RubyBaseNode {
         }
     }
 
+    @SuppressWarnings("deprecation")
     @Specialization
     protected RuntimeException translate(Throwable throwable, UnsupportedOperationBehavior unsupportedOperationBehavior,
             @Cached BranchProfile controlProfile,
@@ -76,7 +78,8 @@ public abstract class TranslateExceptionNode extends RubyBaseNode {
             @Cached BranchProfile arithmeticProfile,
             @Cached BranchProfile unsupportedProfile,
             @Cached BranchProfile errorProfile,
-            @CachedContext(RubyLanguage.class) RubyContext context) {
+            @CachedContext(RubyLanguage.class) RubyContext context,
+            @CachedLanguage RubyLanguage language) {
         try {
             // Only throwing to use the pattern matching of catch
             throw throwable;
@@ -109,11 +112,11 @@ public abstract class TranslateExceptionNode extends RubyBaseNode {
             throw exception;
         } catch (Throwable exception) {
             errorProfile.enter();
-            if (exception instanceof AbstractTruffleException) {
+            if (exception instanceof com.oracle.truffle.api.TruffleException) {
                 // A foreign exception
                 return new RaiseException(
                         context,
-                        translateForeignException(context, (AbstractTruffleException) exception));
+                        translateForeignException(context, language, exception));
             } else {
                 // An internal exception
                 CompilerDirectives.transferToInterpreter(/* internal exceptions are fatal */);
@@ -239,7 +242,7 @@ public abstract class TranslateExceptionNode extends RubyBaseNode {
     }
 
     @TruffleBoundary
-    private RubyException translateForeignException(RubyContext context, AbstractTruffleException exception) {
+    private RubyException translateForeignException(RubyContext context, RubyLanguage language, Throwable exception) {
         logJavaException(context, this, exception);
 
         // NOTE (eregon, 2 Feb. 2018): This could maybe be modeled as translating each exception to
@@ -258,7 +261,7 @@ public abstract class TranslateExceptionNode extends RubyBaseNode {
             }
 
             if (lastBacktrace != null) {
-                appendTruffleStackTrace(context, builder, lastBacktrace);
+                appendTruffleStackTrace(context, language, builder, lastBacktrace);
                 lastBacktrace = null;
             }
 
@@ -274,6 +277,7 @@ public abstract class TranslateExceptionNode extends RubyBaseNode {
                 // internalError() backtrace.
                 final BacktraceFormatter formatter = new BacktraceFormatter(
                         context,
+                        language,
                         EnumSet.noneOf(FormattingFlags.class));
                 final String formattedBacktrace = formatter
                         .formatBacktrace(rubyException, rubyException.backtrace);
@@ -307,8 +311,12 @@ public abstract class TranslateExceptionNode extends RubyBaseNode {
         }
     }
 
-    private void appendTruffleStackTrace(RubyContext context, StringBuilder builder, Backtrace backtrace) {
-        final BacktraceFormatter formatter = new BacktraceFormatter(context, EnumSet.noneOf(FormattingFlags.class));
+    private void appendTruffleStackTrace(RubyContext context, RubyLanguage language, StringBuilder builder,
+            Backtrace backtrace) {
+        final BacktraceFormatter formatter = new BacktraceFormatter(
+                context,
+                language,
+                EnumSet.noneOf(FormattingFlags.class));
         final String formattedBacktrace = formatter.formatBacktrace(null, backtrace);
         builder.append(formattedBacktrace).append('\n');
     }

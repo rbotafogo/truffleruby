@@ -26,6 +26,7 @@ import org.truffleruby.SuppressFBWarnings;
 import org.truffleruby.collections.ConcurrentOperations;
 import org.truffleruby.core.basicobject.BasicObjectNodes.ObjectIDNode;
 import org.truffleruby.core.exception.RubyException;
+import org.truffleruby.core.exception.RubySystemExit;
 import org.truffleruby.core.fiber.FiberManager;
 import org.truffleruby.core.fiber.RubyFiber;
 import org.truffleruby.core.klass.RubyClass;
@@ -54,6 +55,7 @@ public class ThreadManager {
     public static final String NAME_PREFIX = "Ruby Thread";
 
     private final RubyContext context;
+    private final RubyLanguage language;
 
     private final RubyThread rootThread;
     @CompilationFinal private Thread rootJavaThread;
@@ -111,8 +113,9 @@ public class ThreadManager {
 
     private final ExecutorService fiberPool;
 
-    public ThreadManager(RubyContext context) {
+    public ThreadManager(RubyContext context, RubyLanguage language) {
         this.context = context;
+        this.language = language;
         this.rootThread = createBootThread("main");
         this.fiberPool = Executors.newCachedThreadPool(this::createFiberJavaThread);
     }
@@ -201,8 +204,8 @@ public class ThreadManager {
     public RubyThread createBootThread(String info) {
         return createThread(
                 context.getCoreLibrary().threadClass,
-                RubyLanguage.threadShape,
-                context.getLanguageSlow(),
+                language.threadShape,
+                language,
                 Nil.INSTANCE,
                 info);
     }
@@ -219,8 +222,8 @@ public class ThreadManager {
         assert currentGroup != null;
         return createThread(
                 context.getCoreLibrary().threadClass,
-                RubyLanguage.threadShape,
-                context.getLanguageSlow(),
+                language.threadShape,
+                language,
                 currentGroup,
                 "<foreign thread>");
     }
@@ -299,17 +302,17 @@ public class ThreadManager {
         start(thread, Thread.currentThread());
         try {
             final Object result = task.get();
-            setThreadValue(context, thread, result);
+            setThreadValue(thread, result);
             // Handlers in the same order as in FiberManager
         } catch (KillException e) {
-            setThreadValue(context, thread, Nil.INSTANCE);
+            setThreadValue(thread, Nil.INSTANCE);
         } catch (RaiseException e) {
-            setException(context, thread, e.getException(), currentNode);
+            setException(thread, e.getException(), currentNode);
         } catch (DynamicReturnException e) {
-            setException(context, thread, context.getCoreExceptions().unexpectedReturn(currentNode), currentNode);
+            setException(thread, context.getCoreExceptions().unexpectedReturn(currentNode), currentNode);
         } catch (ExitException e) {
             rethrowOnMainThread(currentNode, e);
-            setThreadValue(context, thread, Nil.INSTANCE);
+            setThreadValue(thread, Nil.INSTANCE);
         } catch (Throwable e) {
             final String message = StringUtils
                     .format("%s terminated with internal error:", Thread.currentThread().getName());
@@ -317,7 +320,7 @@ public class ThreadManager {
             // Immediately print internal exceptions, in case they would cause a deadlock
             runtimeException.printStackTrace();
             rethrowOnMainThread(currentNode, runtimeException);
-            setThreadValue(context, thread, Nil.INSTANCE);
+            setThreadValue(thread, Nil.INSTANCE);
         } finally {
             assert thread.value != null || thread.exception != null;
             cleanup(thread, Thread.currentThread());
@@ -334,17 +337,16 @@ public class ThreadManager {
                 });
     }
 
-    private static void setThreadValue(RubyContext context, RubyThread thread, Object value) {
+    private void setThreadValue(RubyThread thread, Object value) {
         // A Thread is always shared (Thread.list)
         assert value != null;
-        SharedObjects.propagate(context, thread, value);
+        SharedObjects.propagate(language, thread, value);
         thread.value = value;
     }
 
-    private static void setException(RubyContext context, RubyThread thread, RubyException exception,
-            Node currentNode) {
+    private void setException(RubyThread thread, RubyException exception, Node currentNode) {
         // A Thread is always shared (Thread.list)
-        SharedObjects.propagate(context, thread, exception);
+        SharedObjects.propagate(language, thread, exception);
 
         // We materialize the backtrace eagerly here, as the exception escapes the thread and needs
         // to capture the backtrace from this thread.
@@ -356,8 +358,7 @@ public class ThreadManager {
         final RubyThread mainThread = context.getThreadManager().getRootThread();
 
         if (thread != mainThread) {
-            final boolean isSystemExit = exception.getLogicalClass() == context
-                    .getCoreLibrary().systemExitClass;
+            final boolean isSystemExit = exception instanceof RubySystemExit;
 
             if (!isSystemExit && thread.reportOnException) {
                 context.send(
@@ -368,7 +369,8 @@ public class ThreadManager {
             }
 
             if (isSystemExit || thread.abortOnException) {
-                ThreadNodes.ThreadRaisePrimitiveNode.raiseInThread(context, mainThread, exception, currentNode);
+                ThreadNodes.ThreadRaisePrimitiveNode
+                        .raiseInThread(language, context, mainThread, exception, currentNode);
             }
         }
         thread.exception = exception;
@@ -376,10 +378,10 @@ public class ThreadManager {
 
     // Share the Ruby Thread before it can be accessed concurrently, and before it is added to Thread.list
     public void startSharing(RubyThread rubyThread, String reason) {
-        if (context.getOptions().SHARED_OBJECTS_ENABLED) {
+        if (language.options.SHARED_OBJECTS_ENABLED) {
             // TODO (eregon, 22 Sept 2017): no need if singleThreaded in isThreadAccessAllowed()
-            context.getSharedObjects().startSharing(reason);
-            SharedObjects.writeBarrier(context, rubyThread);
+            context.getSharedObjects().startSharing(language, reason);
+            SharedObjects.writeBarrier(language, rubyThread);
         }
     }
 
@@ -480,7 +482,7 @@ public class ThreadManager {
                 result = action.block();
             } catch (InterruptedException e) {
                 // We were interrupted, possibly by the SafepointManager.
-                context.getSafepointManager().pollFromBlockingCall(currentNode);
+                SafepointManager.pollFromBlockingCall(language, currentNode);
             }
         } while (result == null);
 
@@ -512,7 +514,7 @@ public class ThreadManager {
                 }
             } catch (InterruptedException e) {
                 // We were interrupted, possibly by the SafepointManager.
-                context.getSafepointManager().pollFromBlockingCall(currentNode);
+                SafepointManager.pollFromBlockingCall(language, currentNode);
             }
         } while (result == null);
 

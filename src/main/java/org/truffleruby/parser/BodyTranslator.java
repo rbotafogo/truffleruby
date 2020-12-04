@@ -44,7 +44,6 @@ import org.truffleruby.core.cast.ToProcNodeGen;
 import org.truffleruby.core.cast.ToSNode;
 import org.truffleruby.core.cast.ToSNodeGen;
 import org.truffleruby.core.hash.ConcatHashLiteralNode;
-import org.truffleruby.core.hash.EnsureSymbolKeysNode;
 import org.truffleruby.core.hash.HashLiteralNode;
 import org.truffleruby.core.kernel.KernelNodesFactory;
 import org.truffleruby.core.module.ModuleNodesFactory;
@@ -59,12 +58,12 @@ import org.truffleruby.core.regexp.RegexpNodes;
 import org.truffleruby.core.regexp.RegexpOptions;
 import org.truffleruby.core.regexp.RubyRegexp;
 import org.truffleruby.core.regexp.TruffleRegexpNodes;
-import org.truffleruby.core.rope.CodeRange;
+import org.truffleruby.core.rope.LeafRope;
 import org.truffleruby.core.rope.Rope;
 import org.truffleruby.core.rope.RopeConstants;
 import org.truffleruby.core.string.InterpolatedStringNode;
-import org.truffleruby.core.string.RubyString;
 import org.truffleruby.core.support.TypeNodes;
+import org.truffleruby.core.string.ImmutableRubyString;
 import org.truffleruby.language.LexicalScope;
 import org.truffleruby.language.Nil;
 import org.truffleruby.language.NotProvided;
@@ -84,6 +83,7 @@ import org.truffleruby.language.control.ElidableResultNode;
 import org.truffleruby.language.control.FrameOnStackNode;
 import org.truffleruby.language.control.IfElseNode;
 import org.truffleruby.language.control.IfNode;
+import org.truffleruby.language.control.InvalidReturnNode;
 import org.truffleruby.language.control.LocalReturnNode;
 import org.truffleruby.language.control.NextNode;
 import org.truffleruby.language.control.NotNode;
@@ -509,10 +509,9 @@ public class BodyTranslator extends Translator {
         if (receiver instanceof StrParseNode && methodName.equals("freeze")) {
             final StrParseNode strNode = (StrParseNode) receiver;
             final Rope nodeRope = strNode.getValue();
-            final CodeRange codeRange = strNode.getCodeRange();
 
-            final Rope rope = language.ropeCache.getRope(nodeRope, codeRange);
-            final RubyString frozenString = context.getFrozenStringLiteral(rope);
+            final ImmutableRubyString frozenString = language
+                    .getFrozenStringLiteral(nodeRope.getBytes(), nodeRope.getEncoding(), strNode.getCodeRange());
 
             return addNewlineIfNeeded(node, withSourceSection(
                     sourceSection,
@@ -693,7 +692,7 @@ public class BodyTranslator extends Translator {
         }
 
         // If the last argument is a splat, do not copy the array, to support m(*args, &args.pop)
-        if (isSplatted && argumentsTranslated.length > 0) {
+        if (isSplatted) {
             final RubyNode last = argumentsTranslated[argumentsTranslated.length - 1];
             if (last instanceof SplatCastNode) {
                 ((SplatCastNode) last).doNotCopy();
@@ -717,8 +716,8 @@ public class BodyTranslator extends Translator {
             frameOnStackMarkerSlot = null;
         } else if (iterNode != null) {
             frameOnStackMarkerSlot = environment.declareVar(environment.allocateLocalTemp("frame_on_stack_marker"));
-            frameOnStackMarkerSlotStack.push(frameOnStackMarkerSlot);
 
+            frameOnStackMarkerSlotStack.push(frameOnStackMarkerSlot);
             try {
                 blockTranslated = iterNode.accept(this);
             } finally {
@@ -845,18 +844,10 @@ public class BodyTranslator extends Translator {
                     null,
                     null);
 
-            final ReturnID returnId;
-
-            if (type == OpenModule.SINGLETON_CLASS) {
-                returnId = environment.getReturnID();
-            } else {
-                returnId = environment.getParseEnvironment().allocateReturnID();
-            }
-
             final TranslatorEnvironment newEnvironment = new TranslatorEnvironment(
                     environment,
                     environment.getParseEnvironment(),
-                    returnId,
+                    ReturnID.MODULE_BODY,
                     true,
                     true,
                     true,
@@ -909,7 +900,7 @@ public class BodyTranslator extends Translator {
         final SourceSection fullSourceSection = sourceSection.toSourceSection(source);
 
         final RubyRootNode rootNode = new RubyRootNode(
-                context,
+                language,
                 fullSourceSection,
                 environment.getFrameDescriptor(),
                 environment.getSharedMethodInfo(),
@@ -1335,7 +1326,7 @@ public class BodyTranslator extends Translator {
 
         if (node.getBody() == null) { // "#{}"
             final SourceIndexLength sourceSection = node.getPosition();
-            ret = new ObjectLiteralNode(context.getFrozenStringLiteral(RopeConstants.EMPTY_ASCII_8BIT_ROPE));
+            ret = new ObjectLiteralNode(language.getFrozenStringLiteral(RopeConstants.EMPTY_ASCII_8BIT_ROPE));
             ret.unsafeSetSourceSection(sourceSection);
         } else {
             ret = node.getBody().accept(this);
@@ -1623,18 +1614,24 @@ public class BodyTranslator extends Translator {
     public RubyNode visitHashNode(HashParseNode node) {
         final SourceIndexLength sourceSection = node.getPosition();
 
-        final List<RubyNode> hashConcats = new ArrayList<>();
+        if (node.isEmpty()) { // an empty Hash literal like h = {}
+            final RubyNode ret = HashLiteralNode.create(language, RubyNode.EMPTY_ARRAY);
+            ret.unsafeSetSourceSection(sourceSection);
+            return addNewlineIfNeeded(node, ret);
+        }
 
+        final List<RubyNode> hashConcats = new ArrayList<>();
         final List<RubyNode> keyValues = new ArrayList<>();
 
         for (ParseNodeTuple pair : node.getPairs()) {
             if (pair.getKey() == null) {
                 // This null case is for splats {a: 1, **{b: 2}, c: 3}
-                final RubyNode hashLiteralSoFar = HashLiteralNode
-                        .create(language, keyValues.toArray(RubyNode.EMPTY_ARRAY));
-                hashConcats.add(hashLiteralSoFar);
-                hashConcats.add(new EnsureSymbolKeysNode(
-                        HashCastNodeGen.create(pair.getValue().accept(this))));
+                if (!keyValues.isEmpty()) {
+                    final RubyNode hashLiteralSoFar = HashLiteralNode
+                            .create(language, keyValues.toArray(RubyNode.EMPTY_ARRAY));
+                    hashConcats.add(hashLiteralSoFar);
+                }
+                hashConcats.add(HashCastNodeGen.create(pair.getValue().accept(this)));
                 keyValues.clear();
             } else {
                 keyValues.add(pair.getKey().accept(this));
@@ -1647,8 +1644,10 @@ public class BodyTranslator extends Translator {
             }
         }
 
-        final RubyNode hashLiteralSoFar = HashLiteralNode.create(language, keyValues.toArray(RubyNode.EMPTY_ARRAY));
-        hashConcats.add(hashLiteralSoFar);
+        if (!keyValues.isEmpty()) {
+            final RubyNode hashLiteralSoFar = HashLiteralNode.create(language, keyValues.toArray(RubyNode.EMPTY_ARRAY));
+            hashConcats.add(hashLiteralSoFar);
+        }
 
         if (hashConcats.size() == 1) {
             final RubyNode ret = hashConcats.get(0);
@@ -2755,7 +2754,7 @@ public class BodyTranslator extends Translator {
         final Rope updatedRope = (Rope) regex.getUserObject();
         final RubyRegexp regexp = RegexpNodes.createRubyRegexp(
                 context.getCoreLibrary().regexpClass,
-                RubyLanguage.regexpShape,
+                language.regexpShape,
                 regex,
                 updatedRope,
                 options,
@@ -2871,7 +2870,12 @@ public class BodyTranslator extends Translator {
         final RubyNode ret;
 
         if (environment.isBlock()) {
-            ret = new DynamicReturnNode(environment.getReturnID(), translatedChild);
+            final ReturnID returnID = environment.getReturnID();
+            if (returnID == ReturnID.MODULE_BODY) {
+                ret = new InvalidReturnNode(translatedChild);
+            } else {
+                ret = new DynamicReturnNode(returnID, translatedChild);
+            }
         } else {
             ret = new LocalReturnNode(translatedChild);
         }
@@ -2937,17 +2941,18 @@ public class BodyTranslator extends Translator {
 
     @Override
     public RubyNode visitStrNode(StrParseNode node) {
-        final Rope rope = language.ropeCache.getRope(node.getValue(), node.getCodeRange());
+        final Rope nodeRope = node.getValue();
         final RubyNode ret;
 
         if (node.isFrozen()) {
-            final RubyString frozenString = context.getFrozenStringLiteral(rope);
+            final ImmutableRubyString frozenString = language
+                    .getFrozenStringLiteral(nodeRope.getBytes(), nodeRope.getEncoding(), node.getCodeRange());
 
-            ret = new DefinedWrapperNode(
-                    language.coreStrings.EXPRESSION,
-                    new ObjectLiteralNode(frozenString));
+            ret = new DefinedWrapperNode(language.coreStrings.EXPRESSION, new ObjectLiteralNode(frozenString));
         } else {
-            ret = new StringLiteralNode(rope);
+            final LeafRope cachedRope = language.ropeCache
+                    .getRope(nodeRope.getBytes(), nodeRope.getEncoding(), node.getCodeRange());
+            ret = new StringLiteralNode(cachedRope);
         }
         ret.unsafeSetSourceSection(node.getPosition());
         return addNewlineIfNeeded(node, ret);

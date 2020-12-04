@@ -10,44 +10,55 @@
 
 module Truffle::GemUtil
   DEFAULT_GEMS = {
+    'benchmark' => true,
     'bigdecimal' => true,
     'bundler' => true,
-    'cmath' => true,
+    'cgi' => true,
     'csv' => true,
     'date' => true,
     'dbm' => true,
-    'e2mmap' => true,
+    'delegate' => true,
+    'did_you_mean' => true,
     'etc' => true,
     'fcntl' => true,
     'fiddle' => true,
     'fileutils' => true,
     'forwardable' => true,
     'gdbm' => true,
-    'ipaddr' => true,
+    'getoptlong' => true,
     'io' => true, # gem 'io-console', required as 'io/console'
+    'ipaddr' => true,
     'irb' => true,
     'json' => true,
     'logger' => true,
     'matrix' => true,
     'mutex_m' => true,
+    'net' => true, # gem 'net-pop', 'net-smtp', required as 'net/pop', 'net/smtp'
+    'observer' => true,
+    'open3' => true,
     'openssl' => true,
     'ostruct' => true,
     'prime' => true,
+    'pstore' => true,
     'psych' => true,
+    'racc' => true,
     'rdoc' => true,
-    'rss' => true,
+    'readline' => true,
+    'reline' => true,
     'rexml' => true,
-    'scanf' => true,
+    'rss' => true,
     'sdbm' => true,
-    'shell' => true,
+    'singleton' => true,
     'stringio' => true,
     'strscan' => true,
-    'sync' => true,
-    'thwait' => true,
+    'timeout' => true,
     'tracer' => true,
+    'uri' => true,
     'webrick' => true,
+    'yaml' => true,
     'zlib' => true
   }
+
 
   MARKER_NAME = 'truffleruby_gem_dir_marker.txt'
 
@@ -81,8 +92,10 @@ module Truffle::GemUtil
   def self.verify_gem_paths
     bad_dirs = bad_gem_dirs(gem_paths)
     unless bad_dirs.empty?
-      warn "[ruby] WARNING gem paths: #{bad_dirs.join ', '} are not marked as installed by TruffleRuby " +
-               '(they could belong to another Ruby implementation and break unexpectedly)'
+      warn "[ruby] WARNING gem paths: #{bad_dirs.join ', '} are not marked as installed by TruffleRuby. " +
+               'They might belong to another Ruby implementation and break unexpectedly. ' +
+               'Configure your Ruby manager to use TruffleRuby, or `unset GEM_HOME GEM_PATH`. ' +
+               'See https://github.com/oracle/truffleruby/blob/master/doc/user/ruby-managers.md'
     end
     bad_dirs
   end

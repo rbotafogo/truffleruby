@@ -9,7 +9,7 @@
  */
 package org.truffleruby.extra;
 
-import org.truffleruby.RubyLanguage;
+import com.oracle.truffle.api.library.CachedLibrary;
 import org.truffleruby.builtins.CoreMethod;
 import org.truffleruby.builtins.CoreMethodArrayArgumentsNode;
 import org.truffleruby.builtins.CoreModule;
@@ -18,11 +18,10 @@ import org.truffleruby.builtins.PrimitiveNode;
 import org.truffleruby.core.method.RubyMethod;
 import org.truffleruby.core.method.RubyUnboundMethod;
 import org.truffleruby.core.proc.ProcType;
-import org.truffleruby.core.string.RubyString;
 import org.truffleruby.core.proc.RubyProc;
-import org.truffleruby.interop.ToJavaStringNode;
 import org.truffleruby.language.RubyNode;
 import org.truffleruby.language.RubyRootNode;
+import org.truffleruby.language.library.RubyStringLibrary;
 import org.truffleruby.language.methods.Split;
 import org.truffleruby.language.threadlocal.SpecialVariableStorage;
 import org.truffleruby.language.arguments.RubyArguments;
@@ -35,7 +34,6 @@ import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.RootCallTarget;
 import com.oracle.truffle.api.Truffle;
-import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.MaterializedFrame;
@@ -138,7 +136,7 @@ public abstract class TruffleGraalNodes {
                 readNode.replace(new ObjectLiteralNode(value));
             }
             final RubyRootNode newRootNode = new RubyRootNode(
-                    getContext(),
+                    getLanguage(),
                     rootNode.getSourceSection(),
                     rootNode.getFrameDescriptor(),
                     rootNode.getSharedMethodInfo(),
@@ -150,11 +148,10 @@ public abstract class TruffleGraalNodes {
                     ? newCallTarget
                     : proc.callTargetForLambdas;
 
-            SpecialVariableStorage storage = proc.declarationStorage;
+            SpecialVariableStorage variables = proc.declarationVariables;
 
             final Object[] args = RubyArguments
                     .pack(
-                            null,
                             null,
                             null,
                             RubyArguments.getMethod(proc.declarationFrame),
@@ -169,17 +166,17 @@ public abstract class TruffleGraalNodes {
                     .getRuntime()
                     .createMaterializedFrame(args, coreLibrary().emptyDeclarationDescriptor);
 
-            newDeclarationFrame.setObject(coreLibrary().emptyDeclarationSpecialVariableSlot, storage);
+            newDeclarationFrame.setObject(coreLibrary().emptyDeclarationSpecialVariableSlot, variables);
 
             return new RubyProc(
                     coreLibrary().procClass,
-                    RubyLanguage.procShape,
+                    getLanguage().procShape,
                     proc.type,
                     proc.sharedMethodInfo,
                     newCallTarget,
                     callTargetForLambdas,
                     newDeclarationFrame,
-                    storage,
+                    variables,
                     proc.method,
                     proc.block,
                     proc.frameOnStackMarker,
@@ -231,10 +228,10 @@ public abstract class TruffleGraalNodes {
     @NodeChild(value = "value", type = RubyNode.class)
     public abstract static class BailoutNode extends PrimitiveNode {
 
-        @Specialization
-        protected Object bailout(RubyString message,
-                @Cached ToJavaStringNode toJavaStringNode) {
-            CompilerDirectives.bailout(toJavaStringNode.executeToJavaString(message));
+        @Specialization(guards = "strings.isRubyString(message)")
+        protected Object bailout(Object message,
+                @CachedLibrary(limit = "2") RubyStringLibrary strings) {
+            CompilerDirectives.bailout(strings.getJavaString(message));
             return nil;
         }
     }

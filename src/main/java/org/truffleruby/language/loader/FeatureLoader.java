@@ -39,6 +39,7 @@ import org.truffleruby.interop.TranslateInteropExceptionNode;
 import org.truffleruby.language.RubyConstant;
 import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.dispatch.DispatchNode;
+import org.truffleruby.language.library.RubyStringLibrary;
 import org.truffleruby.platform.NativeConfiguration;
 import org.truffleruby.platform.Platform;
 import org.truffleruby.platform.TruffleNFIPlatform;
@@ -59,6 +60,7 @@ import com.oracle.truffle.api.source.SourceSection;
 public class FeatureLoader {
 
     private final RubyContext context;
+    private final RubyLanguage language;
 
     private final ReentrantLockFreeingMap<String> fileLocks = new ReentrantLockFreeingMap<>();
     /** Maps basename without extension -> autoload path -> autoload constant, to detect when require-ing a file already
@@ -77,8 +79,9 @@ public class FeatureLoader {
 
     private static final String[] EXTENSIONS = new String[]{ TruffleRuby.EXTENSION, RubyLanguage.CEXT_EXTENSION };
 
-    public FeatureLoader(RubyContext context) {
+    public FeatureLoader(RubyContext context, RubyLanguage language) {
         this.context = context;
+        this.language = language;
     }
 
     public void initialize(NativeConfiguration nativeConfiguration, TruffleNFIPlatform nfi) {
@@ -287,7 +290,7 @@ public class FeatureLoader {
                     context.getCoreLibrary().truffleFeatureLoaderModule,
                     "get_expanded_load_path");
             for (Object pathObject : ArrayOperations.toIterable(expandedLoadPath)) {
-                final String loadPath = ((RubyString) pathObject).getJavaString();
+                final String loadPath = RubyStringLibrary.getUncached().getJavaString(pathObject);
 
                 if (context.getOptions().LOG_FEATURE_LOCATION) {
                     RubyLanguage.LOGGER.info(String.format("from load path %s...", loadPath));
@@ -308,7 +311,7 @@ public class FeatureLoader {
                         "get_expanded_load_path");
                 for (Object pathObject : ArrayOperations.toIterable(expandedLoadPath)) {
                     // $LOAD_PATH entries are canonicalized since Ruby 2.4.4
-                    final String loadPath = ((RubyString) pathObject).getJavaString();
+                    final String loadPath = RubyStringLibrary.getUncached().getJavaString(pathObject);
 
                     if (context.getOptions().LOG_FEATURE_LOCATION) {
                         RubyLanguage.LOGGER.info(String.format("from load path %s...", loadPath));
@@ -420,7 +423,10 @@ public class FeatureLoader {
             Metrics.printTime("before-load-cext-support");
             try {
                 final RubyString cextRb = StringOperations
-                        .createString(context, StringOperations.encodeRope("truffle/cext", UTF8Encoding.INSTANCE));
+                        .createString(
+                                context,
+                                language,
+                                StringOperations.encodeRope("truffle/cext", UTF8Encoding.INSTANCE));
                 context.send(context.getCoreLibrary().mainObject, "gem_original_require", cextRb);
 
                 final RubyModule truffleModule = context.getCoreLibrary().truffleModule;

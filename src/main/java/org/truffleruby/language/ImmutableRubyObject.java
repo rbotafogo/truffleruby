@@ -9,6 +9,7 @@
  */
 package org.truffleruby.language;
 
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import org.truffleruby.RubyContext;
 import org.truffleruby.RubyLanguage;
 import org.truffleruby.cext.ValueWrapper;
@@ -63,19 +64,6 @@ public abstract class ImmutableRubyObject implements TruffleObject {
     public boolean isFrozen() {
         return true;
     }
-
-    @ExportMessage
-    public boolean isTainted() {
-        return false;
-    }
-
-    @ExportMessage
-    public void taint() {
-    }
-
-    @ExportMessage
-    public void untaint() {
-    }
     // endregion
 
     // region InteropLibrary messages
@@ -89,8 +77,11 @@ public abstract class ImmutableRubyObject implements TruffleObject {
         return RubyLanguage.class;
     }
 
+    @TruffleBoundary
     @ExportMessage
-    public abstract String toDisplayString(boolean allowSideEffects);
+    public String toDisplayString(boolean allowSideEffects) {
+        throw new AbstractMethodError();
+    }
 
     // region Members
     @ExportMessage

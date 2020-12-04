@@ -18,6 +18,7 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 
+import com.oracle.truffle.api.library.CachedLibrary;
 import org.jcodings.specific.UTF8Encoding;
 import org.truffleruby.RubyContext;
 import org.truffleruby.RubyLanguage;
@@ -32,7 +33,6 @@ import org.truffleruby.collections.ConcurrentOperations;
 import org.truffleruby.core.array.RubyArray;
 import org.truffleruby.core.cast.BooleanCastWithDefaultNodeGen;
 import org.truffleruby.core.cast.NameToJavaStringNode;
-import org.truffleruby.core.cast.TaintResultNode;
 import org.truffleruby.core.cast.ToPathNodeGen;
 import org.truffleruby.core.cast.ToStrNode;
 import org.truffleruby.core.cast.ToStringOrSymbolNodeGen;
@@ -51,6 +51,7 @@ import org.truffleruby.core.proc.RubyProc;
 import org.truffleruby.core.rope.CodeRange;
 import org.truffleruby.core.rope.Rope;
 import org.truffleruby.core.rope.RopeNodes;
+import org.truffleruby.core.rope.RopeOperations;
 import org.truffleruby.core.string.RubyString;
 import org.truffleruby.core.string.StringCachingGuards;
 import org.truffleruby.core.string.StringNodes;
@@ -81,6 +82,7 @@ import org.truffleruby.language.constants.LookupConstantNode;
 import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.dispatch.DispatchNode;
 import org.truffleruby.language.eval.CreateEvalSourceNode;
+import org.truffleruby.language.library.RubyStringLibrary;
 import org.truffleruby.language.loader.CodeLoader;
 import org.truffleruby.language.methods.AddMethodNode;
 import org.truffleruby.language.methods.Arity;
@@ -123,7 +125,6 @@ import com.oracle.truffle.api.nodes.NodeUtil;
 import com.oracle.truffle.api.profiles.BranchProfile;
 import com.oracle.truffle.api.profiles.ValueProfile;
 import com.oracle.truffle.api.source.SourceSection;
-
 
 @CoreModule(value = "Module", isClass = true)
 public abstract class ModuleNodes {
@@ -364,8 +365,6 @@ public abstract class ModuleNodes {
     @CoreMethod(names = "append_features", required = 1, visibility = Visibility.PRIVATE, split = Split.NEVER)
     public abstract static class AppendFeaturesNode extends CoreMethodArrayArgumentsNode {
 
-        @Child private TaintResultNode taintResultNode = new TaintResultNode();
-
         @Specialization
         protected Object appendFeatures(RubyModule features, RubyModule target,
                 @Cached BranchProfile errorProfile) {
@@ -376,7 +375,6 @@ public abstract class ModuleNodes {
                         coreExceptions().typeError("append_features must be called only on modules", this));
             }
             target.fields.include(getContext(), this, features);
-            taintResultNode.maybeTaint(features, target);
             return nil;
         }
     }
@@ -436,7 +434,7 @@ public abstract class ModuleNodes {
             final RubyNode body = Translator
                     .createCheckArityNode(language, arity, accessInstanceVariable);
             final RubyRootNode rootNode = new RubyRootNode(
-                    getContext(),
+                    language,
                     sourceSection,
                     null,
                     sharedMethodInfo,
@@ -562,8 +560,9 @@ public abstract class ModuleNodes {
         }
 
         @TruffleBoundary
-        @Specialization
-        protected Object autoload(RubyModule module, String name, RubyString filename) {
+        @Specialization(guards = "libFilename.isRubyString(filename)")
+        protected Object autoload(RubyModule module, String name, Object filename,
+                @CachedLibrary(limit = "2") RubyStringLibrary libFilename) {
             if (!Identifiers.isValidConstantName(name)) {
                 throw new RaiseException(
                         getContext(),
@@ -574,11 +573,12 @@ public abstract class ModuleNodes {
                                 this));
             }
 
-            if (filename.rope.isEmpty()) {
+            if (libFilename.getRope(filename).isEmpty()) {
                 throw new RaiseException(getContext(), coreExceptions().argumentError("empty file name", this));
             }
 
-            module.fields.setAutoloadConstant(getContext(), this, name, filename);
+            final String javaStringFilename = libFilename.getJavaString(filename);
+            module.fields.setAutoloadConstant(getContext(), this, name, filename, javaStringFilename);
             return nil;
         }
     }
@@ -591,11 +591,13 @@ public abstract class ModuleNodes {
             return isAutoload(module, name.getString());
         }
 
-        @Specialization
-        protected Object isAutoloadString(RubyModule module, RubyString name) {
-            return isAutoload(module, name.getJavaString());
+        @Specialization(guards = "strings.isRubyString(name)")
+        protected Object isAutoloadString(RubyModule module, Object name,
+                @CachedLibrary(limit = "2") RubyStringLibrary strings) {
+            return isAutoload(module, strings.getJavaString(name));
         }
 
+        @TruffleBoundary
         private Object isAutoload(RubyModule module, String name) {
             final ConstantLookupResult constant = ModuleOperations.lookupConstant(getContext(), module, name);
 
@@ -614,7 +616,7 @@ public abstract class ModuleNodes {
         @Child private ToStrNode toStrNode;
         @Child private ReadCallerFrameNode readCallerFrameNode = ReadCallerFrameNode.create();
 
-        protected RubyString toStr(VirtualFrame frame, Object object) {
+        protected Object toStr(VirtualFrame frame, Object object) {
             if (toStrNode == null) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
                 toStrNode = insert(ToStrNode.create());
@@ -622,44 +624,49 @@ public abstract class ModuleNodes {
             return toStrNode.executeToStr(object);
         }
 
-        @Specialization
+        @Specialization(guards = { "libCode.isRubyString(code)" })
         protected Object classEval(
                 VirtualFrame frame,
                 RubyModule module,
-                RubyString code,
+                Object code,
                 NotProvided file,
                 NotProvided line,
                 NotProvided block,
-                @Cached IndirectCallNode callNode) {
+                @Cached IndirectCallNode callNode,
+                @CachedLibrary(limit = "2") RubyStringLibrary libCode) {
             return classEvalSource(frame, module, code, "(eval)", callNode);
         }
 
-        @Specialization
+        @Specialization(guards = { "libCode.isRubyString(code)", "libFile.isRubyString(file)" })
         protected Object classEval(
                 VirtualFrame frame,
                 RubyModule module,
-                RubyString code,
-                RubyString file,
+                Object code,
+                Object file,
                 NotProvided line,
                 NotProvided block,
-                @Cached IndirectCallNode callNode) {
-            return classEvalSource(frame, module, code, file.getJavaString(), callNode);
+                @Cached IndirectCallNode callNode,
+                @CachedLibrary(limit = "2") RubyStringLibrary libCode,
+                @CachedLibrary(limit = "2") RubyStringLibrary libFile) {
+            return classEvalSource(frame, module, code, libFile.getJavaString(file), callNode);
         }
 
-        @Specialization
+        @Specialization(guards = { "libCode.isRubyString(code)", "wasProvided(file)" })
         protected Object classEval(
                 VirtualFrame frame,
                 RubyModule module,
-                RubyString code,
-                RubyString file,
+                Object code,
+                Object file,
                 int line,
                 NotProvided block,
-                @Cached IndirectCallNode callNode) {
+                @Cached IndirectCallNode callNode,
+                @CachedLibrary(limit = "2") RubyStringLibrary libCode,
+                @CachedLibrary(limit = "2") RubyStringLibrary libFile) {
             final CodeLoader.DeferredCall deferredCall = classEvalSource(
                     frame,
                     module,
                     code,
-                    file.getJavaString(),
+                    libFile.getJavaString(file),
                     line);
             return deferredCall.call(callNode);
         }
@@ -676,26 +683,29 @@ public abstract class ModuleNodes {
             return classEvalSource(frame, module, toStr(frame, code), "(eval)", callNode);
         }
 
-        @Specialization(guards = { "wasProvided(file)" })
+        @Specialization(guards = { "libCode.isRubyString(code)", "wasProvided(file)" })
         protected Object classEval(
                 VirtualFrame frame,
                 RubyModule module,
-                RubyString code,
+                Object code,
                 Object file,
                 NotProvided line,
                 NotProvided block,
-                @Cached IndirectCallNode callNode) {
-            return classEvalSource(frame, module, code, toStr(frame, file).getJavaString(), callNode);
+                @CachedLibrary(limit = "2") RubyStringLibrary stringLibrary,
+                @Cached IndirectCallNode callNode,
+                @CachedLibrary(limit = "2") RubyStringLibrary libCode) {
+            final String javaString = stringLibrary.getJavaString(toStr(frame, file));
+            return classEvalSource(frame, module, code, javaString, callNode);
         }
 
-        private Object classEvalSource(VirtualFrame frame, RubyModule module, RubyString code, String file,
+        private Object classEvalSource(VirtualFrame frame, RubyModule module, Object code, String file,
                 @Cached IndirectCallNode callNode) {
             final CodeLoader.DeferredCall deferredCall = classEvalSource(frame, module, code, file, 1);
             return deferredCall.call(callNode);
         }
 
         private CodeLoader.DeferredCall classEvalSource(VirtualFrame frame, RubyModule module,
-                RubyString rubySource, String file, int line) {
+                Object rubySource, String file, int line) {
 
             final MaterializedFrame callerFrame = readCallerFrameNode.execute(frame);
 
@@ -703,10 +713,14 @@ public abstract class ModuleNodes {
         }
 
         @TruffleBoundary
-        private CodeLoader.DeferredCall classEvalSourceInternal(RubyModule module, RubyString rubySource,
+        private CodeLoader.DeferredCall classEvalSourceInternal(RubyModule module, Object rubySource,
                 String file, int line, MaterializedFrame callerFrame) {
             final RubySource source = createEvalSourceNode
-                    .createEvalSource(rubySource.rope, "class/module_eval", file, line);
+                    .createEvalSource(
+                            RubyStringLibrary.getUncached().getRope(rubySource),
+                            "class/module_eval",
+                            file,
+                            line);
 
             final RubyRootNode rootNode = getContext().getCodeLoader().parse(
                     source,
@@ -846,7 +860,7 @@ public abstract class ModuleNodes {
         protected Object setClassVariable(RubyModule module, String name, Object value) {
             SymbolTable.checkClassVariableName(getContext(), name, module, this);
 
-            ModuleOperations.setClassVariable(getContext(), module, name, value, this);
+            ModuleOperations.setClassVariable(getLanguage(), getContext(), module, name, value, this);
 
             return value;
         }
@@ -966,31 +980,40 @@ public abstract class ModuleNodes {
         // String
 
         @Specialization(
-                guards = { "inherit", "equalNode.execute(name.rope, cachedRope)", "!scoped" },
+                guards = {
+                        "stringsName.isRubyString(name)",
+                        "inherit",
+                        "equalNode.execute(stringsName.getRope(name), cachedRope)",
+                        "!scoped" },
                 limit = "getLimit()")
-        protected Object getConstantStringCached(RubyModule module, RubyString name, boolean inherit,
-                @Cached("privatizeRope(name)") Rope cachedRope,
-                @Cached("name.getJavaString()") String cachedString,
+        protected Object getConstantStringCached(RubyModule module, Object name, boolean inherit,
+                @CachedLibrary(limit = "2") RubyStringLibrary stringsName,
+                @Cached("stringsName.getRope(name)") Rope cachedRope,
+                @Cached("stringsName.getJavaString(name)") String cachedString,
                 @Cached RopeNodes.EqualNode equalNode,
                 @Cached("isScoped(cachedString)") boolean scoped) {
             return getConstant(module, cachedString);
         }
 
         @Specialization(
-                guards = { "inherit", "!isScoped(name)" },
+                guards = { "stringsName.isRubyString(name)", "inherit", "!isScoped(stringsName.getRope(name))" },
                 replaces = "getConstantStringCached")
-        protected Object getConstantString(RubyModule module, RubyString name, boolean inherit) {
-            return getConstant(module, name.getJavaString());
+        protected Object getConstantString(RubyModule module, Object name, boolean inherit,
+                @CachedLibrary(limit = "2") RubyStringLibrary stringsName) {
+            return getConstant(module, stringsName.getJavaString(name));
         }
 
-        @Specialization(guards = { "!inherit", "!isScoped(name)" })
-        protected Object getConstantNoInheritString(RubyModule module, RubyString name, boolean inherit) {
-            return getConstantNoInherit(module, name.getJavaString());
+        @Specialization(
+                guards = { "stringsName.isRubyString(name)", "!inherit", "!isScoped(stringsName.getRope(name))" })
+        protected Object getConstantNoInheritString(RubyModule module, Object name, boolean inherit,
+                @CachedLibrary(limit = "2") RubyStringLibrary stringsName) {
+            return getConstantNoInherit(module, stringsName.getJavaString(name));
         }
 
         // Scoped String
-        @Specialization(guards = { "isScoped(name)" })
-        protected Object getConstantScoped(RubyModule module, RubyString name, boolean inherit) {
+        @Specialization(guards = { "stringsName.isRubyString(name)", "isScoped(stringsName.getRope(name))" })
+        protected Object getConstantScoped(RubyModule module, Object name, boolean inherit,
+                @CachedLibrary(limit = "2") RubyStringLibrary stringsName) {
             return FAILURE;
         }
 
@@ -1011,9 +1034,9 @@ public abstract class ModuleNodes {
         }
 
         @TruffleBoundary
-        boolean isScoped(RubyString name) {
+        boolean isScoped(Rope name) {
             // TODO (eregon, 27 May 2015): Any way to make this efficient?
-            return name.getJavaString().contains("::");
+            return RopeOperations.decodeRope(name).contains("::");
         }
 
         boolean isScoped(String name) {
@@ -1214,7 +1237,7 @@ public abstract class ModuleNodes {
             final RubyNode body = NodeUtil.cloneNode(rootNode.getBody());
             final RubyNode newBody = new CallMethodWithProcBody(proc.declarationFrame, body);
             final RubyRootNode newRootNode = new RubyRootNode(
-                    getContext(),
+                    getLanguage(),
                     info.getSourceSection(),
                     rootNode.getFrameDescriptor(),
                     info,
@@ -1537,8 +1560,6 @@ public abstract class ModuleNodes {
     @CoreMethod(names = "prepend_features", required = 1, visibility = Visibility.PRIVATE, split = Split.NEVER)
     public abstract static class PrependFeaturesNode extends CoreMethodArrayArgumentsNode {
 
-        @Child private TaintResultNode taintResultNode = new TaintResultNode();
-
         @Specialization
         protected Object prependFeatures(RubyModule features, RubyModule target,
                 @Cached BranchProfile errorProfile) {
@@ -1549,7 +1570,6 @@ public abstract class ModuleNodes {
                         coreExceptions().typeError("prepend_features must be called only on modules", this));
             }
             target.fields.prepend(getContext(), this, features);
-            taintResultNode.maybeTaint(features, target);
             return nil;
         }
     }
@@ -1599,7 +1619,7 @@ public abstract class ModuleNodes {
 
             final RubyUnboundMethod instance = new RubyUnboundMethod(
                     coreLibrary().unboundMethodClass,
-                    RubyLanguage.unboundMethodShape,
+                    getLanguage().unboundMethodShape,
                     module,
                     method);
             AllocationTracing.trace(instance, this);
@@ -1755,7 +1775,7 @@ public abstract class ModuleNodes {
 
             final RubyUnboundMethod instance = new RubyUnboundMethod(
                     coreLibrary().unboundMethodClass,
-                    RubyLanguage.unboundMethodShape,
+                    getLanguage().unboundMethodShape,
                     module,
                     method);
             AllocationTracing.trace(instance, this);
@@ -1928,7 +1948,7 @@ public abstract class ModuleNodes {
                     }
                     final Object inspectResult = callRbInspect
                             .call(coreLibrary().truffleTypeModule, "rb_inspect", attached);
-                    attachedName = ((RubyString) inspectResult).getJavaString();
+                    attachedName = RubyStringLibrary.getUncached().getJavaString(inspectResult);
                 }
                 moduleName = "#<Class:" + attachedName + ">";
             } else if (fields.isRefinement()) {

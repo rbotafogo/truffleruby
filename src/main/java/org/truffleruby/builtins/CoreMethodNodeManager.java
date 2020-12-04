@@ -13,12 +13,11 @@ import java.util.List;
 import java.util.function.Function;
 
 import com.oracle.truffle.api.CompilerDirectives;
-import com.oracle.truffle.api.source.SourceSection;
 import org.truffleruby.RubyContext;
 import org.truffleruby.RubyLanguage;
 import org.truffleruby.collections.CachedSupplier;
+import org.truffleruby.core.CoreLibrary;
 import org.truffleruby.core.array.ArrayUtils;
-import org.truffleruby.core.cast.TaintResultNode;
 import org.truffleruby.core.klass.RubyClass;
 import org.truffleruby.core.module.ConstantLookupResult;
 import org.truffleruby.core.module.ModuleOperations;
@@ -145,7 +144,7 @@ public class CoreMethodNodeManager {
 
         final Function<SharedMethodInfo, RootCallTarget> callTargetFactory = sharedMethodInfo -> {
             final RubyNode methodNode = createCoreMethodNode(nodeFactory, annotation, sharedMethodInfo);
-            return createCallTarget(context, sharedMethodInfo, methodNode, split);
+            return createCallTarget(language, sharedMethodInfo, methodNode, split);
         };
 
         addMethods(module, isModuleFunc, onSingleton, names, arity, visibility, callTargetFactory);
@@ -173,7 +172,7 @@ public class CoreMethodNodeManager {
             final NodeFactory<? extends RubyNode> nodeFactory = loadNodeFactory(nodeFactoryName);
             final CoreMethod annotation = nodeFactory.getNodeClass().getAnnotation(CoreMethod.class);
             final RubyNode methodNode = createCoreMethodNode(nodeFactory, annotation, sharedMethodInfo);
-            return createCallTarget(context, sharedMethodInfo, methodNode, finalSplit);
+            return createCallTarget(language, sharedMethodInfo, methodNode, finalSplit);
         };
 
         addMethods(module, isModuleFunc, onSingleton, names, arity, visibility, callTargetFactory);
@@ -208,7 +207,7 @@ public class CoreMethodNodeManager {
         final LexicalScope lexicalScope = new LexicalScope(context.getRootLexicalScope(), module);
 
         for (String name : names) {
-            final SharedMethodInfo sharedMethodInfo = makeSharedMethodInfo(context, lexicalScope, module, name, arity);
+            final SharedMethodInfo sharedMethodInfo = makeSharedMethodInfo(lexicalScope, module, name, arity);
 
             module.fields.addMethod(context, null, new InternalMethod(
                     context,
@@ -223,10 +222,9 @@ public class CoreMethodNodeManager {
         }
     }
 
-    private static SharedMethodInfo makeSharedMethodInfo(RubyContext context, LexicalScope lexicalScope,
-            RubyModule module, String name, Arity arity) {
-        final SourceSection sourceSection = context.getCoreLibrary().sourceSection;
-        return new SharedMethodInfo(sourceSection, lexicalScope, arity, module, name, 0, "builtin", null);
+    private static SharedMethodInfo makeSharedMethodInfo(LexicalScope lexicalScope, RubyModule module, String name,
+            Arity arity) {
+        return new SharedMethodInfo(CoreLibrary.SOURCE_SECTION, lexicalScope, arity, module, name, 0, "builtin", null);
     }
 
     private static Arity createArity(int required, int optional, boolean rest, String keywordAsOptional) {
@@ -235,10 +233,10 @@ public class CoreMethodNodeManager {
                 : new Arity(required, optional, rest, 0, new String[]{ keywordAsOptional }, true, false);
     }
 
-    private static RootCallTarget createCallTarget(RubyContext context, SharedMethodInfo sharedMethodInfo,
+    private static RootCallTarget createCallTarget(RubyLanguage language, SharedMethodInfo sharedMethodInfo,
             RubyNode methodNode, Split split) {
         final RubyRootNode rootNode = new RubyRootNode(
-                context,
+                language,
                 sharedMethodInfo.getSourceSection(),
                 null,
                 sharedMethodInfo,
@@ -347,12 +345,6 @@ public class CoreMethodNodeManager {
         } else if (method.returnsEnumeratorIfNoBlock()) {
             // TODO BF 3-18-2015 Handle multiple method names correctly
             node = new ReturnEnumeratorIfNoBlockNode(method.names()[0], node);
-        }
-
-        if (method.taintFrom() != -1) {
-            final boolean taintFromSelf = method.taintFrom() == 0;
-            final int taintFromArg = taintFromSelf ? -1 : method.taintFrom() - 1;
-            node = new TaintResultNode(taintFromSelf, taintFromArg, node);
         }
 
         return node;

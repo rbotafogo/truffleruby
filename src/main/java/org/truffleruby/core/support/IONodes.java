@@ -66,8 +66,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Arrays;
 
+import com.oracle.truffle.api.library.CachedLibrary;
 import org.jcodings.specific.ASCIIEncoding;
-import org.truffleruby.RubyLanguage;
 import org.truffleruby.builtins.CoreMethod;
 import org.truffleruby.builtins.CoreMethodArrayArgumentsNode;
 import org.truffleruby.builtins.CoreModule;
@@ -78,7 +78,6 @@ import org.truffleruby.builtins.UnaryCoreMethodNode;
 import org.truffleruby.core.klass.RubyClass;
 import org.truffleruby.core.rope.CodeRange;
 import org.truffleruby.core.rope.Rope;
-import org.truffleruby.core.string.RubyString;
 import org.truffleruby.core.string.StringNodes.MakeStringNode;
 import org.truffleruby.core.thread.GetCurrentRubyThreadNode;
 import org.truffleruby.core.thread.RubyThread;
@@ -88,7 +87,7 @@ import org.truffleruby.extra.ffi.Pointer;
 import org.truffleruby.extra.ffi.RubyPointer;
 import org.truffleruby.language.Visibility;
 import org.truffleruby.language.control.RaiseException;
-import org.truffleruby.language.objects.AllocateHelperNode;
+import org.truffleruby.language.library.RubyStringLibrary;
 import org.truffleruby.language.objects.AllocationTracing;
 import org.truffleruby.platform.Platform;
 
@@ -96,7 +95,6 @@ import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Specialization;
-import com.oracle.truffle.api.object.Shape;
 import com.oracle.truffle.api.profiles.BranchProfile;
 import com.oracle.truffle.api.profiles.ConditionProfile;
 
@@ -106,12 +104,9 @@ public abstract class IONodes {
     @CoreMethod(names = { "__allocate__", "__layout_allocate__" }, constructor = true, visibility = Visibility.PRIVATE)
     public static abstract class AllocateNode extends UnaryCoreMethodNode {
 
-        @Child private AllocateHelperNode allocateNode = AllocateHelperNode.create();
-
         @Specialization
         protected RubyIO allocate(RubyClass rubyClass) {
-            final Shape shape = allocateNode.getCachedShape(rubyClass);
-            final RubyIO instance = new RubyIO(rubyClass, shape, RubyIO.CLOSED_FD);
+            final RubyIO instance = new RubyIO(rubyClass, getLanguage().ioShape, RubyIO.CLOSED_FD);
             AllocationTracing.trace(instance, this);
             return instance;
         }
@@ -141,10 +136,12 @@ public abstract class IONodes {
     public static abstract class FileFNMatchPrimitiveNode extends PrimitiveArrayArgumentsNode {
 
         @TruffleBoundary
-        @Specialization
-        protected boolean fnmatch(RubyString pattern, RubyString path, int flags) {
-            final Rope patternRope = pattern.rope;
-            final Rope pathRope = path.rope;
+        @Specialization(guards = { "stringsPattern.isRubyString(pattern)", "stringsPath.isRubyString(path)" })
+        protected boolean fnmatch(Object pattern, Object path, int flags,
+                @CachedLibrary(limit = "2") RubyStringLibrary stringsPattern,
+                @CachedLibrary(limit = "2") RubyStringLibrary stringsPath) {
+            final Rope patternRope = stringsPattern.getRope(pattern);
+            final Rope pathRope = stringsPath.getRope(path);
 
             return fnmatch(
                     patternRope.getBytes(),
@@ -469,8 +466,9 @@ public abstract class IONodes {
     public static abstract class IOWritePolyglotNode extends PrimitiveArrayArgumentsNode {
 
         @TruffleBoundary
-        @Specialization
-        protected int write(int fd, RubyString string) {
+        @Specialization(guards = "strings.isRubyString(string)")
+        protected int write(int fd, Object string,
+                @CachedLibrary(limit = "2") RubyStringLibrary strings) {
             final OutputStream stream;
 
             switch (fd) {
@@ -485,7 +483,7 @@ public abstract class IONodes {
                     throw CompilerDirectives.shouldNotReachHere();
             }
 
-            final Rope rope = string.rope;
+            final Rope rope = strings.getRope(string);
             final byte[] bytes = rope.getBytes();
 
             getContext().getThreadManager().runUntilResult(this, () -> {
@@ -512,7 +510,7 @@ public abstract class IONodes {
             RubyThread thread = currentThreadNode.execute();
             final RubyPointer instance = new RubyPointer(
                     coreLibrary().truffleFFIPointerClass,
-                    RubyLanguage.truffleFFIPointerShape,
+                    getLanguage().truffleFFIPointerShape,
                     getBuffer(thread, size, sizeProfile));
             AllocationTracing.trace(instance, this);
             return instance;

@@ -32,7 +32,7 @@ PROFILES_DIR = "#{TRUFFLERUBY_DIR}/profiles"
 CACHE_EXTRA_DIR = File.expand_path('~/.mx/cache/truffleruby')
 FileUtils.mkdir_p(CACHE_EXTRA_DIR)
 
-TRUFFLERUBY_GEM_TEST_PACK_VERSION = 'fe5cfa6d14ce50b154fafbc8551cb656d4a39d3d'
+TRUFFLERUBY_GEM_TEST_PACK_VERSION = '02e158f0f04845018e843666477ef134c15f76e9'
 
 JDEBUG = '--vm.agentlib:jdwp=transport=dt_socket,server=y,address=8000,suspend=y'
 METRICS_REPS = Integer(ENV['TRUFFLERUBY_METRICS_REPS'] || 10)
@@ -143,19 +143,17 @@ module Utilities
     end
   end
 
-  def jvmci_update_and_version
-    if env = ENV['JVMCI_VERSION']
-      unless /8u(\d+(?:\+\d+)?)-(jvmci-\d+\.\d+-b\d+)/ =~ env
-        raise 'Could not parse JDK update and JVMCI version from $JVMCI_VERSION'
-      end
-    else
+  def jvmci_version
+    @jvmci_version ||= begin
       ci = File.read("#{TRUFFLERUBY_DIR}/common.json")
-      unless /{\s*"name"\s*:\s*"openjdk"\s*,\s*"version"\s*:\s*"8u(\d+(?:\+\d+)?)-(jvmci-[^"]+)"\s*,/ =~ ci
-        raise 'JVMCI version not found in common.json'
+      if @jdk_version == 8
+        regex = /{\s*"name"\s*:\s*"openjdk"\s*,\s*"version"\s*:\s*"8u.+-(jvmci-[^"]+)"\s*,/
+      else
+        regex = /{\s*"name"\s*:\s*"labsjdk"\s*,\s*"version"\s*:\s*"ce-11\..+-(jvmci-[^"]+)"\s*,/
       end
+      raise 'JVMCI version not found in common.json' unless regex =~ ci
+      $1
     end
-    update, jvmci = $1, $2
-    [update, jvmci]
   end
 
   def send_signal(signal, pid)
@@ -518,19 +516,26 @@ module Utilities
       end
       java_home ||= ENV['JAVA_HOME']
 
-      _, jvmci_version = jvmci_update_and_version
       if java_home
+        java_home = File.realpath(java_home)
         if java_home.include?(jvmci_version)
+          return :use_env_java_home
+        end
+
+        java_version_output = `#{java_home}/bin/java -version 2>&1`
+        if java_version_output.include?(jvmci_version)
           :use_env_java_home
-        elsif java_home.include?('jvmci')
+        elsif java_version_output.include?('jvmci')
           warn "warning: JAVA_HOME=#{java_home} is not the same JVMCI version as in common.json (#{jvmci_version})"
           :use_env_java_home
         else
-          raise "$JAVA_HOME does not seem to point to a JVMCI-enabled JDK (#{java_home.inspect} does not contain 'jvmci')"
+          raise "$JAVA_HOME does not seem to point to a JVMCI-enabled JDK (`#{java_home}/bin/java -version` does not contain 'jvmci')"
         end
       else
         raise '$JAVA_HOME should be set in CI' if ci?
-        install_jvmci('$JAVA_HOME is not set, downloading JDK8 with JVMCI')
+        install_jvmci(
+            "$JAVA_HOME is not set, downloading JDK#{@jdk_version} with JVMCI",
+            (@mx_env || @ruby_name || '').include?('ee'))
       end
     end
   end
@@ -548,7 +553,7 @@ module Utilities
     mx_args = args.dup
 
     env = mx_args.first.is_a?(Hash) ? mx_args.shift : {}
-    mx_args.unshift '--java-home', java_home unless java_home == :use_env_java_home
+    mx_args.unshift '--java-home', java_home unless java_home == :use_env_java_home or java_home == :none
 
     raw_sh(env, find_mx, *mx_args, **options)
   end
@@ -625,6 +630,7 @@ module Commands
                                     Default value is --use jvm, therefore all commands run on truffleruby-jvm by default.
                                     The default can be changed with `export RUBY_BIN=RUBY_SELECTOR`
           --silent                  Does not print the command and which Ruby is used
+          --jdk                     Specifies which version of the JDK should be used: 8 (default) or 11
 
       jt build [graalvm|parser|options] ...   by default it builds graalvm
         jt build [parser|options] [options]
@@ -847,6 +853,8 @@ module Commands
         args.unshift '--check-compilation'
       when '--asm'
         vm_args += %w[--vm.XX:+UnlockDiagnosticVMOptions --vm.XX:CompileCommand=print,*::callRoot]
+      when '--jacoco'
+        vm_args << jacoco_args
       when '--jdebug'
         vm_args << JDEBUG
       when '--jexception', '--jexceptions'
@@ -1100,13 +1108,14 @@ module Commands
 
     truffle_args = []
     if truffleruby?
-      truffle_args += %w(--reveal --vm.Xmx2G --testing-rubygems)
+      truffle_args += %w(--reveal --vm.Xmx2G)
     end
 
     env_vars = {
       'EXCLUDES' => 'test/mri/excludes',
-      'RUBYGEMS_TEST_PATH' => MRI_TEST_PREFIX,
+      'RUBYGEMS_TEST_PATH' => "#{MRI_TEST_PREFIX}/rubygems",
       'RUBYOPT' => [*ENV['RUBYOPT'], '--disable-gems'].join(' '),
+      'TRUFFLERUBYOPT' => [*ENV['TRUFFLERUBYOPT'], '--experimental-options', '--testing-rubygems'].join(' '),
     }
     compile_env = {
       # MRI C-ext tests expect to be built with $extmk = true.
@@ -1198,8 +1207,17 @@ module Commands
     end
   end
 
+  private def jacoco_args
+    out = mx('ruby_jacoco_args', '--quiet', '--no-warning', capture: :out).lines.last.chomp
+    out.sub('-', '--vm.')
+  end
+
   private def test_cexts(*args)
-    all_tests = %w(tools minimum method module globals backtraces xopenssl postinstallhook gems)
+    all_tests = %w[
+      tools minimum method module globals backtraces xopenssl postinstallhook
+      oily_png psd_native
+      puma sqlite3 unf_ext json RubyInline msgpack
+    ]
     no_openssl = args.delete('--no-openssl')
     no_gems = args.delete('--no-gems')
     tests = args.empty? ? all_tests : all_tests & args
@@ -1207,6 +1225,12 @@ module Commands
     tests.delete 'gems' if no_gems
 
     tests.each do |test_name|
+      run_single_cexts_test(test_name)
+    end
+  end
+
+  private def run_single_cexts_test(test_name)
+    time_test("jt test cexts #{test_name}") do
       case test_name
       when 'tools'
         # Test tools
@@ -1214,7 +1238,6 @@ module Commands
 
       when 'minimum', 'method', 'module', 'globals', 'backtraces', 'xopenssl'
         # Test that we can compile and run some very basic C extensions
-
         begin
           output_file = 'cext-output.txt'
           dir = "#{TRUFFLERUBY_DIR}/test/truffle/cexts/#{test_name}"
@@ -1242,48 +1265,49 @@ module Commands
         end
 
       when 'postinstallhook'
-
         # Test that running the post-install hook works, even when opt &
         # llvm-link are not on PATH, as it is the case on macOS.
         sh({'TRUFFLERUBY_RECOMPILE_OPENSSL' => 'true'}, "#{ruby_home}/lib/truffle/post_install_hook.sh")
 
-      when 'gems'
-        # Test that we can compile and run some real C extensions
-
+      when 'oily_png', 'psd_native'
         gem_home = "#{gem_test_pack}/gems"
+        tests = {
+          'oily_png' => [['chunky_png-1.3.6', 'oily_png-1.2.0'], ['oily_png']],
+          'psd_native' => [['chunky_png-1.3.6', 'oily_png-1.2.0', 'bindata-2.3.1', 'hashie-3.4.4', 'psd-enginedata-1.1.1', 'psd-2.1.2', 'psd_native-1.1.3'], ['oily_png', 'psd_native']],
+        }
 
-        tests = [
-            ['oily_png', ['chunky_png-1.3.6', 'oily_png-1.2.0'], ['oily_png']],
-            ['psd_native', ['chunky_png-1.3.6', 'oily_png-1.2.0', 'bindata-2.3.1', 'hashie-3.4.4', 'psd-enginedata-1.1.1', 'psd-2.1.2', 'psd_native-1.1.3'], ['oily_png', 'psd_native']],
-            ['nokogiri', [], ['nokogiri']]
-        ]
+        gem_name = test_name
+        dependencies, libs = tests.fetch(gem_name)
 
-        tests.each do |gem_name, dependencies, libs|
-          puts '', gem_name
-          next if gem_name == 'nokogiri' # nokogiri totally excluded
-          gem_root = "#{TRUFFLERUBY_DIR}/test/truffle/cexts/#{gem_name}"
-          ext_dir = Dir.glob("#{gem_home}/gems/#{gem_name}*/")[0] + "ext/#{gem_name}"
+        puts '', gem_name
+        gem_root = "#{TRUFFLERUBY_DIR}/test/truffle/cexts/#{gem_name}"
+        ext_dir = Dir.glob("#{gem_home}/gems/#{gem_name}*/")[0] + "ext/#{gem_name}"
 
-          compile_cext gem_name, ext_dir, "#{gem_root}/lib/#{gem_name}/#{gem_name}.#{DLEXT}", ['-Werror=implicit-function-declaration']
+        compile_cext gem_name, ext_dir, "#{gem_root}/lib/#{gem_name}/#{gem_name}.#{DLEXT}", ['-Werror=implicit-function-declaration']
 
-          next if gem_name == 'psd_native' # psd_native is excluded just for running
-          run_ruby(*dependencies.map { |d| "-I#{gem_home}/gems/#{d}/lib" },
-                   *libs.map { |l| "-I#{TRUFFLERUBY_DIR}/test/truffle/cexts/#{l}/lib" },
-                   "#{TRUFFLERUBY_DIR}/test/truffle/cexts/#{gem_name}/test.rb", gem_root)
-        end
+        next if gem_name == 'psd_native' # psd_native is excluded just for running
+        run_ruby(*dependencies.map { |d| "-I#{gem_home}/gems/#{d}/lib" },
+                 *libs.map { |l| "-I#{TRUFFLERUBY_DIR}/test/truffle/cexts/#{l}/lib" },
+                 "#{TRUFFLERUBY_DIR}/test/truffle/cexts/#{gem_name}/test.rb", gem_root)
 
-        # Tests using gem install to compile the cexts
+      # Tests using gem install to compile the cexts
+      when 'puma'
         sh 'test/truffle/cexts/puma/puma.sh'
+      when 'sqlite3'
         sh 'test/truffle/cexts/sqlite3/sqlite3.sh'
+      when 'unf_ext'
         sh 'test/truffle/cexts/unf_ext/unf_ext.sh'
+      when 'json'
         sh 'test/truffle/cexts/json/json.sh'
 
+      when 'RubyInline'
         # Test a gem dynamically compiling a C extension
         # Does not work on macOS. Also fails on macOS on MRI with --enabled-shared.
         # It's a bug of RubyInline not using LIBRUBYARG/LIBRUBYARG_SHARED.
         sh 'test/truffle/cexts/RubyInline/RubyInline.sh' unless darwin?
 
-        # Test cexts used by many projects
+      # Test cexts used by many projects
+      when 'msgpack'
         sh 'test/truffle/cexts/msgpack/msgpack.sh'
       else
         raise "unknown test: #{test_name}"
@@ -1305,15 +1329,21 @@ module Commands
 
     STDERR.puts
     candidates.each do |test_script|
-      STDERR.puts "[jt] Running #{test_script} ..."
-      start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      begin
+      time_test(test_script) do
         yield test_script
-      ensure
-        finish = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        duration = finish - start
-        STDERR.puts "[jt] #{test_script} took #{'%.1f' % duration}s\n\n\n"
       end
+    end
+  end
+
+  private def time_test(test_name)
+    STDERR.puts "[jt] Running #{test_name} ..."
+    start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    begin
+      yield
+    ensure
+      finish = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      duration = finish - start
+      STDERR.puts "[jt] #{test_name} took #{'%.1f' % duration}s\n\n\n"
     end
   end
 
@@ -1478,11 +1508,15 @@ module Commands
 
     current = raw_sh(env, 'git', '-C', gem_test_pack, 'rev-parse', 'HEAD', capture: :out, no_print_cmd: true).chomp
     unless current == TRUFFLERUBY_GEM_TEST_PACK_VERSION
-      has_commit = raw_sh env, 'git', '-C', gem_test_pack, 'cat-file', '-e', TRUFFLERUBY_GEM_TEST_PACK_VERSION, continue_on_failure: true
-      unless has_commit
-        raw_sh env, 'git', '-C', gem_test_pack, 'fetch', Remotes.bitbucket(gem_test_pack), continue_on_failure: true
+      if ENV['GEM_TEST_PACK_WIP'] == 'true'
+        STDERR.puts 'WARNING: the gem test pack commit is different than TRUFFLERUBY_GEM_TEST_PACK_VERSION in jt.rb'
+      else
+        has_commit = raw_sh env, 'git', '-C', gem_test_pack, 'cat-file', '-e', TRUFFLERUBY_GEM_TEST_PACK_VERSION, continue_on_failure: true
+        unless has_commit
+          raw_sh env, 'git', '-C', gem_test_pack, 'fetch', Remotes.bitbucket(gem_test_pack), continue_on_failure: true
+        end
+        raw_sh env, 'git', '-C', gem_test_pack, 'checkout', '-q', TRUFFLERUBY_GEM_TEST_PACK_VERSION
       end
-      raw_sh env, 'git', '-C', gem_test_pack, 'checkout', '-q', TRUFFLERUBY_GEM_TEST_PACK_VERSION
     end
 
     puts gem_test_pack
@@ -1900,7 +1934,7 @@ module Commands
   def install(name, *options)
     case name
     when 'jvmci'
-      puts install_jvmci('Downloading JDK8 with JVMCI')
+      puts install_jvmci('Downloading JDK8 with JVMCI', (@ruby_name || '').include?('ee'))
     when 'eclipse'
       puts install_eclipse
     else
@@ -1908,32 +1942,33 @@ module Commands
     end
   end
 
-  private def install_jvmci(download_message)
-    raise 'Installing JVMCI is only available on Linux and macOS currently' unless linux? || darwin?
-
-    update, jvmci_version = jvmci_update_and_version
-    java_home = begin
-      dir_pattern = "#{CACHE_EXTRA_DIR}/openjdk1.8.0*#{jvmci_version}"
-      if Dir[dir_pattern].empty?
-        STDERR.puts download_message
-        jvmci_releases = 'https://github.com/graalvm/graal-jvmci-8/releases/download'
-        filename = "openjdk-8u#{update}-#{jvmci_version}-#{mx_os}-amd64.tar.gz"
-        chdir(CACHE_EXTRA_DIR) do
-          raw_sh 'curl', '-L', "#{jvmci_releases}/#{jvmci_version}/#{filename}", '-o', filename
-          raw_sh 'tar', 'xf', filename
-        end
-      end
-      dirs = Dir[dir_pattern]
-      abort "ambiguous JVMCI directories:\n#{dirs.join("\n")}" if dirs.length != 1
-      extracted = dirs.first
-      darwin? ? "#{extracted}/Contents/Home" : extracted
+  private def install_jvmci(download_message, ee)
+    if @jdk_version == 8
+      jdk_name = ee ? 'oraclejdk8' : 'openjdk8'
+    else
+      jdk_name = ee ? 'labsjdk-ee-11' : 'labsjdk-ce-11'
     end
 
-    abort 'Could not find the extracted JDK' unless java_home
-    java_home = File.expand_path(java_home)
+    java_home = "#{CACHE_EXTRA_DIR}/#{jdk_name}-#{jvmci_version}"
+    unless File.directory?(java_home)
+      STDERR.puts "#{download_message} (#{jdk_name})"
+      if ee
+        mx_env = 'jvm-ee'
+        options = { java_home: install_jvmci('Downloading OpenJDK8 JVMCI to bootstrap', false) }
+      else
+        mx_env = 'jvm'
+        options = { chdir: CACHE_EXTRA_DIR, java_home: :none } # chdir to not try to load a suite (which would need a JAVA_HOME)
+      end
+      mx '--env', mx_env, '-y', 'fetch-jdk',
+         '--configuration', "#{TRUFFLERUBY_DIR}/common.json",
+         '--java-distribution', jdk_name,
+         '--to', CACHE_EXTRA_DIR,
+         **options
+    end
 
+    java_home = "#{java_home}/Contents/Home" if darwin?
     java = "#{java_home}/bin/java"
-    abort "#{java_home} does not exist" unless File.executable?(java)
+    abort "#{java} does not exist" unless File.executable?(java)
 
     java_home
   end
@@ -2073,6 +2108,7 @@ module Commands
           else
             'jvm'
           end
+    @mx_env = env
     raise 'Cannot use both --use and --env' if defined?(@ruby_name)
 
     @ruby_name = if (i = options.index('--name') || options.index('-n'))
@@ -2086,12 +2122,13 @@ module Commands
     mx_base_args = ['-p', TRUFFLERUBY_DIR, '--env', env]
 
     # Must clone enterprise before running `mx scheckimports` in `sforceimports?`
-    cloned = env.include?('ee') && clone_enterprise
+    ee = env.include?('ee')
+    cloned = clone_enterprise if ee
     checkout_enterprise_revision(env) if cloned
 
     if options.delete('--sforceimports') || sforceimports?(mx_base_args)
       mx('-p', TRUFFLERUBY_DIR, 'sforceimports')
-      checkout_enterprise_revision(env) if env.include?('ee') && !cloned
+      checkout_enterprise_revision(env) if ee && !cloned
     end
 
     mx_options, mx_build_options = args_split(options)
@@ -2285,6 +2322,7 @@ module Commands
       https://github.com/oracle/truffleruby/blob/master/doc/user/installing-libssl.md
       https://github.com/oracle/truffleruby/blob/master/doc/user/installing-llvm.md
       https://github.com/oracle/truffleruby/blob/master/doc/user/installing-zlib.md
+      https://github.com/oracle/truffleruby/blob/master/doc/user/ruby-managers.md
     ]
 
     known_hardcoded_urls.each do |url|
@@ -2406,7 +2444,7 @@ module Commands
       each_file do |content|
         content
           .sub(/\n{3,}import /, "\n\nimport ")
-          .sub(/^(import .+;)\n{3,}public/, "\\1\n\npublic")
+          .sub(/^(import .+;)\n{3,}((?:(?:@|\/\/|\/\*).+\n)*)public/, "\\1\n\n\\2public")
       end
     end
 
@@ -2610,25 +2648,46 @@ class JT
     JT.new.gem_test_pack
   end
 
+  def process_pre_args(args)
+    needs_build = false
+    needs_rebuild = false
+    @silent = false
+    @jdk_version = 8
+
+    until args.empty?
+      arg = args.shift
+      case arg
+      when '--build'
+        needs_build = true
+      when '--rebuild'
+        needs_rebuild = true
+      when '-u', '--use'
+        @ruby_name = args.shift
+      when '--silent'
+        @silent = true
+      when '--jdk'
+        @jdk_version = Integer(args.shift)
+      when '-h', '-help', '--help'
+        help
+        exit
+      else
+        args.unshift arg
+        break
+      end
+    end
+
+    raise "Invalid JDK version: #{@jdk_version}" if @jdk_version != 8 && @jdk_version != 11
+
+    if needs_rebuild
+      rebuild
+    elsif needs_build
+      build
+    end
+  end
+
   def main(args)
     args = args.dup
-
-    if args.empty? or %w[-h -help --help].include? args.first
-      help
-      exit
-    end
-
-    if args.first =~ /^--((?:re)?build)$/
-      send $1
-      args.shift
-    end
-
-    if args.first == '--use' || args.first == '-u'
-      args.shift
-      @ruby_name = args.shift
-    end
-
-    @silent = !!args.delete('--silent')
+    process_pre_args(args)
 
     commands = Commands.public_instance_methods(false).map(&:to_s)
 

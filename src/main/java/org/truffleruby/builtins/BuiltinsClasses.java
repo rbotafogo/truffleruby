@@ -48,12 +48,18 @@ import org.truffleruby.core.encoding.EncodingNodesBuiltins;
 import org.truffleruby.core.encoding.EncodingNodesFactory;
 import org.truffleruby.core.exception.ExceptionNodesBuiltins;
 import org.truffleruby.core.exception.ExceptionNodesFactory;
+import org.truffleruby.core.exception.FrozenErrorNodesBuiltins;
+import org.truffleruby.core.exception.FrozenErrorNodesFactory;
 import org.truffleruby.core.exception.NameErrorNodesBuiltins;
 import org.truffleruby.core.exception.NameErrorNodesFactory;
 import org.truffleruby.core.exception.NoMethodErrorNodesBuiltins;
 import org.truffleruby.core.exception.NoMethodErrorNodesFactory;
+import org.truffleruby.core.exception.SyntaxErrorNodesBuiltins;
+import org.truffleruby.core.exception.SyntaxErrorNodesFactory;
 import org.truffleruby.core.exception.SystemCallErrorNodesBuiltins;
 import org.truffleruby.core.exception.SystemCallErrorNodesFactory;
+import org.truffleruby.core.exception.SystemExitNodesBuiltins;
+import org.truffleruby.core.exception.SystemExitNodesFactory;
 import org.truffleruby.core.fiber.FiberNodesBuiltins;
 import org.truffleruby.core.fiber.FiberNodesFactory;
 import org.truffleruby.core.hash.HashNodesBuiltins;
@@ -147,8 +153,6 @@ import org.truffleruby.stdlib.CoverageNodesBuiltins;
 import org.truffleruby.stdlib.CoverageNodesFactory;
 import org.truffleruby.stdlib.ObjSpaceNodesBuiltins;
 import org.truffleruby.stdlib.ObjSpaceNodesFactory;
-import org.truffleruby.stdlib.bigdecimal.BigDecimalNodesBuiltins;
-import org.truffleruby.stdlib.bigdecimal.BigDecimalNodesFactory;
 import org.truffleruby.stdlib.digest.DigestNodesBuiltins;
 import org.truffleruby.stdlib.digest.DigestNodesFactory;
 import org.truffleruby.stdlib.readline.ReadlineHistoryNodesBuiltins;
@@ -168,7 +172,6 @@ public abstract class BuiltinsClasses {
         ArrayNodesBuiltins.setup(coreManager);
         AtomicReferenceNodesBuiltins.setup(coreManager);
         BasicObjectNodesBuiltins.setup(coreManager);
-        BigDecimalNodesBuiltins.setup(coreManager);
         BindingNodesBuiltins.setup(coreManager);
         ByteArrayNodesBuiltins.setup(coreManager);
         CExtNodesBuiltins.setup(coreManager);
@@ -182,6 +185,7 @@ public abstract class BuiltinsClasses {
         FalseClassNodesBuiltins.setup(coreManager);
         FiberNodesBuiltins.setup(coreManager);
         FloatNodesBuiltins.setup(coreManager);
+        FrozenErrorNodesBuiltins.setup(coreManager);
         GCNodesBuiltins.setup(coreManager);
         HashNodesBuiltins.setup(coreManager);
         IntegerNodesBuiltins.setup(coreManager);
@@ -212,7 +216,9 @@ public abstract class BuiltinsClasses {
         SizedQueueNodesBuiltins.setup(coreManager);
         StringNodesBuiltins.setup(coreManager);
         SymbolNodesBuiltins.setup(coreManager);
+        SyntaxErrorNodesBuiltins.setup(coreManager);
         SystemCallErrorNodesBuiltins.setup(coreManager);
+        SystemExitNodesBuiltins.setup(coreManager);
         ThreadBacktraceLocationNodesBuiltins.setup(coreManager);
         ThreadNodesBuiltins.setup(coreManager);
         TimeNodesBuiltins.setup(coreManager);
@@ -243,7 +249,6 @@ public abstract class BuiltinsClasses {
         ArrayNodesBuiltins.setupPrimitives(primitiveManager);
         AtomicReferenceNodesBuiltins.setupPrimitives(primitiveManager);
         BasicObjectNodesBuiltins.setupPrimitives(primitiveManager);
-        BigDecimalNodesBuiltins.setupPrimitives(primitiveManager);
         BindingNodesBuiltins.setupPrimitives(primitiveManager);
         ByteArrayNodesBuiltins.setupPrimitives(primitiveManager);
         CExtNodesBuiltins.setupPrimitives(primitiveManager);
@@ -257,6 +262,7 @@ public abstract class BuiltinsClasses {
         FalseClassNodesBuiltins.setupPrimitives(primitiveManager);
         FiberNodesBuiltins.setupPrimitives(primitiveManager);
         FloatNodesBuiltins.setupPrimitives(primitiveManager);
+        FrozenErrorNodesBuiltins.setupPrimitives(primitiveManager);
         GCNodesBuiltins.setupPrimitives(primitiveManager);
         HashNodesBuiltins.setupPrimitives(primitiveManager);
         IntegerNodesBuiltins.setupPrimitives(primitiveManager);
@@ -287,7 +293,9 @@ public abstract class BuiltinsClasses {
         SizedQueueNodesBuiltins.setupPrimitives(primitiveManager);
         StringNodesBuiltins.setupPrimitives(primitiveManager);
         SymbolNodesBuiltins.setupPrimitives(primitiveManager);
+        SyntaxErrorNodesBuiltins.setupPrimitives(primitiveManager);
         SystemCallErrorNodesBuiltins.setupPrimitives(primitiveManager);
+        SystemExitNodesBuiltins.setupPrimitives(primitiveManager);
         ThreadBacktraceLocationNodesBuiltins.setupPrimitives(primitiveManager);
         ThreadNodesBuiltins.setupPrimitives(primitiveManager);
         TimeNodesBuiltins.setupPrimitives(primitiveManager);
@@ -319,7 +327,6 @@ public abstract class BuiltinsClasses {
                 ArrayNodesFactory.getFactories(),
                 AtomicReferenceNodesFactory.getFactories(),
                 BasicObjectNodesFactory.getFactories(),
-                BigDecimalNodesFactory.getFactories(),
                 BindingNodesFactory.getFactories(),
                 ByteArrayNodesFactory.getFactories(),
                 CExtNodesFactory.getFactories(),
@@ -333,6 +340,7 @@ public abstract class BuiltinsClasses {
                 FalseClassNodesFactory.getFactories(),
                 FiberNodesFactory.getFactories(),
                 FloatNodesFactory.getFactories(),
+                FrozenErrorNodesFactory.getFactories(),
                 GCNodesFactory.getFactories(),
                 HashNodesFactory.getFactories(),
                 IntegerNodesFactory.getFactories(),
@@ -363,7 +371,9 @@ public abstract class BuiltinsClasses {
                 SizedQueueNodesFactory.getFactories(),
                 StringNodesFactory.getFactories(),
                 SymbolNodesFactory.getFactories(),
+                SyntaxErrorNodesFactory.getFactories(),
                 SystemCallErrorNodesFactory.getFactories(),
+                SystemExitNodesFactory.getFactories(),
                 ThreadBacktraceLocationNodesFactory.getFactories(),
                 ThreadNodesFactory.getFactories(),
                 TimeNodesFactory.getFactories(),

@@ -33,11 +33,8 @@ rm lib/mri/racc/rdoc/grammar.en.rdoc
 rm lib/mri/securerandom.rb
 rm lib/mri/timeout.rb
 rm lib/mri/weakref.rb
-# Uses TracePoint.new(:call), and we have a more efficient --cpusampler
-rm lib/mri/profiler.rb
 # Uses RubyVM
 rm lib/mri/debug.rb
-rm lib/mri/profile.rb
 # Files not actually installed in MRI
 find lib/mri -name '*.gemspec' -delete
 find lib/mri -name '.document' -delete
@@ -61,8 +58,9 @@ cp -r ../ruby/ext/ripper/lib/ripper lib/mri
 cp -r ../ruby/ext/syslog/lib/syslog lib/mri
 
 # Copy C extensions in ext/, sorted alphabetically
-rm -r src/main/c/{etc,nkf,openssl,psych,rbconfig-sizeof,syslog,ripper,zlib}
-mkdir src/main/c/{etc,nkf,openssl,psych,rbconfig-sizeof,syslog,ripper,zlib}
+rm -r src/main/c/{bigdecimal,etc,nkf,openssl,psych,rbconfig-sizeof,syslog,ripper,zlib}
+mkdir src/main/c/{bigdecimal,etc,nkf,openssl,psych,rbconfig-sizeof,syslog,ripper,zlib}
+cp ../ruby/ext/bigdecimal/*.{c,gemspec,h,rb} src/main/c/bigdecimal
 cp ../ruby/ext/etc/*.{c,rb} src/main/c/etc
 cp ../ruby/ext/nkf/*.{c,rb} src/main/c/nkf
 cp -r ../ruby/ext/nkf/nkf-utf8 src/main/c/nkf
@@ -91,7 +89,10 @@ find test/mri/tests/cext-ruby -name '*.rb' -print0 | xargs -0 -n 1 sed -i.backup
 find test/mri/tests/cext-ruby -name '*.backup' -delete
 rm -rf test/mri/excludes
 git checkout -- test/mri/excludes
-git checkout -- test/mri/tests/runner.rb
+
+# Copy from tool/lib to test/lib
+cp -r ../ruby/tool/lib/* test/mri/tests/lib
+rm -f test/mri/tests/lib/leakchecker.rb
 
 # basictest/ and bootstraptest/
 rm -rf test/basictest

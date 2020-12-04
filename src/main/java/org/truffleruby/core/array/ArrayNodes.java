@@ -15,6 +15,7 @@ import static org.truffleruby.language.dispatch.DispatchNode.PUBLIC;
 
 import java.util.Arrays;
 
+import com.oracle.truffle.api.object.Shape;
 import com.oracle.truffle.api.profiles.LoopConditionProfile;
 import org.graalvm.collections.EconomicSet;
 import org.graalvm.collections.Equivalence;
@@ -61,6 +62,7 @@ import org.truffleruby.core.range.RangeNodes.NormalizedStartLengthNode;
 import org.truffleruby.core.range.RubyRange;
 import org.truffleruby.core.rope.Rope;
 import org.truffleruby.core.rope.RopeNodes;
+import org.truffleruby.core.rope.RopeOperations;
 import org.truffleruby.core.string.RubyString;
 import org.truffleruby.core.string.StringCachingGuards;
 import org.truffleruby.core.string.StringNodes;
@@ -75,11 +77,9 @@ import org.truffleruby.language.RubyNode;
 import org.truffleruby.language.Visibility;
 import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.dispatch.DispatchNode;
-import org.truffleruby.language.library.RubyLibrary;
+import org.truffleruby.language.library.RubyStringLibrary;
 import org.truffleruby.language.methods.Split;
-import org.truffleruby.language.objects.AllocateHelperNode;
 import org.truffleruby.language.objects.AllocationTracing;
-import org.truffleruby.language.objects.PropagateTaintNode;
 import org.truffleruby.language.objects.WriteObjectFieldNode;
 import org.truffleruby.language.objects.shared.PropagateSharingNode;
 import org.truffleruby.language.yield.YieldNode;
@@ -110,19 +110,13 @@ public abstract class ArrayNodes {
     @CoreMethod(names = { "__allocate__", "__layout_allocate__" }, constructor = true, visibility = Visibility.PRIVATE)
     public abstract static class AllocateNode extends CoreMethodArrayArgumentsNode {
 
-        @Child private AllocateHelperNode helperNode = AllocateHelperNode.create();
-
         @Specialization
         protected RubyArray allocate(RubyClass rubyClass) {
-            RubyArray array = new RubyArray(
-                    rubyClass,
-                    helperNode.getCachedShape(rubyClass),
-                    ArrayStoreLibrary.INITIAL_STORE,
-                    0);
+            final Shape shape = getLanguage().arrayShape;
+            final RubyArray array = new RubyArray(rubyClass, shape, ArrayStoreLibrary.INITIAL_STORE, 0);
             AllocationTracing.trace(array, this);
             return array;
         }
-
     }
 
     @CoreMethod(names = "+", required = 1)
@@ -158,19 +152,14 @@ public abstract class ArrayNodes {
     @ReportPolymorphism
     public abstract static class MulNode extends PrimitiveArrayArgumentsNode {
 
-        @Child private AllocateHelperNode helperNode = AllocateHelperNode.create();
-        @Child private PropagateTaintNode propagateTaintNode = PropagateTaintNode.create();
-
         @Specialization(guards = "count == 0")
         protected RubyArray mulZero(RubyArray array, int count) {
             final RubyClass logicalClass = array.getLogicalClass();
-            final RubyArray result = new RubyArray(
+            return new RubyArray(
                     logicalClass,
-                    helperNode.getCachedShape(logicalClass),
+                    getLanguage().arrayShape,
                     ArrayStoreLibrary.INITIAL_STORE,
                     0);
-            propagateTaintNode.executePropagate(array, result);
-            return result;
         }
 
         @Specialization(
@@ -195,13 +184,11 @@ public abstract class ArrayNodes {
             }
 
             final RubyClass logicalClass = array.getLogicalClass();
-            final RubyArray result = new RubyArray(
+            return new RubyArray(
                     logicalClass,
-                    helperNode.getCachedShape(logicalClass),
+                    getLanguage().arrayShape,
                     newStore,
                     newSize);
-            propagateTaintNode.executePropagate(array, result);
-            return result;
         }
 
         @Specialization(guards = "count < 0")
@@ -217,13 +204,11 @@ public abstract class ArrayNodes {
         @Specialization(guards = { "isEmptyArray(array)" })
         protected RubyArray mulEmpty(RubyArray array, long count) {
             final RubyClass logicalClass = array.getLogicalClass();
-            final RubyArray result = new RubyArray(
+            return new RubyArray(
                     logicalClass,
-                    helperNode.getCachedShape(logicalClass),
+                    getLanguage().arrayShape,
                     ArrayStoreLibrary.INITIAL_STORE,
                     0);
-            propagateTaintNode.executePropagate(array, result);
-            return result;
         }
 
         @Specialization(guards = { "!isInteger(count)", "!isLong(count)" })
@@ -462,7 +447,6 @@ public abstract class ArrayNodes {
     }
 
     @CoreMethod(names = "clear", raiseIfFrozenSelf = true)
-    @ReportPolymorphism
     public abstract static class ClearNode extends ArrayCoreMethodNode {
 
         @Specialization
@@ -1491,14 +1475,13 @@ public abstract class ArrayNodes {
 
     @NodeChild(value = "array", type = RubyNode.class)
     @NodeChild(value = "format", type = RubyNode.class)
-    @CoreMethod(names = "pack", required = 1, taintFrom = 1)
+    @CoreMethod(names = "pack", required = 1)
     @ImportStatic({ StringCachingGuards.class, StringOperations.class })
     @ReportPolymorphism
     public abstract static class PackNode extends CoreMethodNode {
 
         @Child private RopeNodes.MakeLeafRopeNode makeLeafRopeNode;
         @Child private StringNodes.MakeStringNode makeStringNode;
-        @Child private RubyLibrary rubyLibrary;
         @Child private WriteObjectFieldNode writeAssociatedNode;
 
         private final BranchProfile exceptionProfile = BranchProfile.create();
@@ -1509,11 +1492,16 @@ public abstract class ArrayNodes {
             return ToStrNodeGen.create(format);
         }
 
-        @Specialization(guards = "equalNode.execute(format.rope, cachedFormat)", limit = "getCacheLimit()")
-        protected RubyString packCached(RubyArray array, RubyString format,
-                @Cached("privatizeRope(format)") Rope cachedFormat,
+        @Specialization(
+                guards = {
+                        "libFormat.isRubyString(format)",
+                        "equalNode.execute(libFormat.getRope(format), cachedFormat)" },
+                limit = "getCacheLimit()")
+        protected RubyString packCached(RubyArray array, Object format,
+                @CachedLibrary(limit = "2") RubyStringLibrary libFormat,
+                @Cached("libFormat.getRope(format)") Rope cachedFormat,
                 @Cached("cachedFormat.byteLength()") int cachedFormatLength,
-                @Cached("create(compileFormat(format))") DirectCallNode callPackNode,
+                @Cached("create(compileFormat(libFormat.getRope(format)))") DirectCallNode callPackNode,
                 @Cached RopeNodes.EqualNode equalNode) {
             final BytesResult result;
 
@@ -1528,21 +1516,23 @@ public abstract class ArrayNodes {
             return finishPack(cachedFormatLength, result);
         }
 
-        @Specialization(replaces = "packCached")
-        protected RubyString packUncached(RubyArray array, RubyString format,
+        @Specialization(guards = { "libFormat.isRubyString(format)" }, replaces = "packCached")
+        protected RubyString packUncached(RubyArray array, Object format,
+                @CachedLibrary(limit = "2") RubyStringLibrary libFormat,
                 @Cached IndirectCallNode callPackNode) {
             final BytesResult result;
 
+            final Rope formatRope = libFormat.getRope(format);
             try {
                 result = (BytesResult) callPackNode.call(
-                        compileFormat(format),
+                        compileFormat(formatRope),
                         new Object[]{ array.store, array.size, false, null });
             } catch (FormatException e) {
                 exceptionProfile.enter();
                 throw FormatExceptionTranslator.translate(getContext(), this, e);
             }
 
-            return finishPack(format.rope.byteLength(), result);
+            return finishPack(formatRope.byteLength(), result);
         }
 
         private RubyString finishPack(int formatLength, BytesResult result) {
@@ -1568,14 +1558,6 @@ public abstract class ArrayNodes {
                     result.getStringCodeRange(),
                     result.getStringLength()));
 
-            if (result.isTainted()) {
-                if (rubyLibrary == null) {
-                    CompilerDirectives.transferToInterpreterAndInvalidate();
-                    rubyLibrary = insert(RubyLibrary.getFactory().createDispatched(getRubyLibraryCacheLimit()));
-                }
-                rubyLibrary.taint(string);
-            }
-
             if (result.getAssociated() != null) {
                 if (writeAssociatedNode == null) {
                     CompilerDirectives.transferToInterpreterAndInvalidate();
@@ -1589,8 +1571,9 @@ public abstract class ArrayNodes {
         }
 
         @TruffleBoundary
-        protected RootCallTarget compileFormat(RubyString format) {
-            return new PackCompiler(getContext(), this).compile(format.getJavaString());
+        protected RootCallTarget compileFormat(Rope rope) {
+            final String javaString = RopeOperations.decodeRope(rope);
+            return new PackCompiler(getContext(), this).compile(javaString);
         }
 
         protected int getCacheLimit() {
@@ -1621,13 +1604,13 @@ public abstract class ArrayNodes {
         @Specialization(guards = { "n >= 0", "isEmptyArray(array)" })
         @ReportPolymorphism.Exclude
         protected RubyArray popEmpty(RubyArray array, int n) {
-            return ArrayHelpers.createEmptyArray(getContext());
+            return createEmptyArray();
         }
 
         @Specialization(guards = { "n == 0", "!isEmptyArray(array)" })
         @ReportPolymorphism.Exclude
         protected RubyArray popZeroNotEmpty(RubyArray array, int n) {
-            return ArrayHelpers.createEmptyArray(getContext());
+            return createEmptyArray();
         }
 
         @Specialization(
@@ -2076,12 +2059,12 @@ public abstract class ArrayNodes {
 
         @Specialization(guards = "n == 0")
         protected Object shiftZero(RubyArray array, int n) {
-            return ArrayHelpers.createEmptyArray(getContext());
+            return createEmptyArray();
         }
 
         @Specialization(guards = { "n > 0", "isEmptyArray(array)" })
         protected Object shiftManyEmpty(RubyArray array, int n) {
-            return ArrayHelpers.createEmptyArray(getContext());
+            return createEmptyArray();
         }
 
         @Specialization(
@@ -2125,7 +2108,7 @@ public abstract class ArrayNodes {
         @Specialization(guards = "isEmptyArray(array)")
         @ReportPolymorphism.Exclude
         protected RubyArray sortEmpty(RubyArray array, Object unusedBlock) {
-            return ArrayHelpers.createEmptyArray(getContext());
+            return createEmptyArray();
         }
 
         @ExplodeLoop
@@ -2178,8 +2161,8 @@ public abstract class ArrayNodes {
                         "!isSmall(array)",
                         "stores.isPrimitive(array.store)" },
                 assumptions = {
-                        "getContext().getLanguageSlow().coreMethodAssumptions.integerCmpAssumption",
-                        "getContext().getLanguageSlow().coreMethodAssumptions.floatCmpAssumption" },
+                        "getLanguage().coreMethodAssumptions.integerCmpAssumption",
+                        "getLanguage().coreMethodAssumptions.floatCmpAssumption" },
                 limit = "storageStrategyLimit()")
         protected Object sortPrimitiveArrayNoBlock(RubyArray array, NotProvided block,
                 @CachedLibrary("array.store") ArrayStoreLibrary stores,

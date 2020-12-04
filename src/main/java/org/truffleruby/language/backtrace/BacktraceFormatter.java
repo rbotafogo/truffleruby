@@ -11,22 +11,26 @@ package org.truffleruby.language.backtrace;
 
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.TruffleStackTrace;
 import com.oracle.truffle.api.TruffleStackTraceElement;
+import com.oracle.truffle.api.exception.AbstractTruffleException;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.RootNode;
 import com.oracle.truffle.api.source.Source;
 import com.oracle.truffle.api.source.SourceSection;
 import org.jcodings.specific.UTF8Encoding;
 import org.truffleruby.RubyContext;
+import org.truffleruby.RubyLanguage;
 import org.truffleruby.SuppressFBWarnings;
 import org.truffleruby.core.array.ArrayHelpers;
 import org.truffleruby.core.array.RubyArray;
 import org.truffleruby.core.exception.ExceptionOperations;
 import org.truffleruby.core.exception.RubyException;
-import org.truffleruby.core.string.RubyString;
 import org.truffleruby.core.string.StringOperations;
 import org.truffleruby.core.string.StringUtils;
 import org.truffleruby.language.RubyRootNode;
+import org.truffleruby.language.control.RaiseException;
+import org.truffleruby.language.library.RubyStringLibrary;
 import org.truffleruby.language.methods.TranslateExceptionNode;
 import org.truffleruby.parser.RubySource;
 
@@ -51,26 +55,29 @@ public class BacktraceFormatter {
             .of(FormattingFlags.OMIT_FROM_PREFIX, FormattingFlags.OMIT_EXCEPTION);
 
     private final RubyContext context;
+    private final RubyLanguage language;
     private final EnumSet<FormattingFlags> flags;
 
     @TruffleBoundary
-    public static BacktraceFormatter createDefaultFormatter(RubyContext context) {
+    public static BacktraceFormatter createDefaultFormatter(RubyContext context, RubyLanguage language) {
         final EnumSet<FormattingFlags> flags = EnumSet.noneOf(FormattingFlags.class);
 
         if (context.getOptions().BACKTRACES_INTERLEAVE_JAVA) {
             flags.add(FormattingFlags.INTERLEAVE_JAVA);
         }
 
-        return new BacktraceFormatter(context, flags);
+        return new BacktraceFormatter(context, language, flags);
     }
 
     // For debugging:
-    // org.truffleruby.language.backtrace.BacktraceFormatter.printableRubyBacktrace(getContext(), this)
+    // org.truffleruby.language.backtrace.BacktraceFormatter.printableRubyBacktrace(this)
     // When outside a Ruby node:
-    // org.truffleruby.language.backtrace.BacktraceFormatter.printableRubyBacktrace(RubyLanguage.getCurrentContext(), null)
-    public static String printableRubyBacktrace(RubyContext context, Node node) {
+    // org.truffleruby.language.backtrace.BacktraceFormatter.printableRubyBacktrace(null)
+    public static String printableRubyBacktrace(Node node) {
+        final RubyContext context = RubyLanguage.getCurrentContext();
         final BacktraceFormatter backtraceFormatter = new BacktraceFormatter(
                 context,
+                RubyLanguage.getCurrentLanguage(),
                 EnumSet.noneOf(FormattingFlags.class));
         final String backtrace = backtraceFormatter.formatBacktrace(null, context.getCallStack().getBacktrace(node));
         if (backtrace.isEmpty()) {
@@ -86,8 +93,9 @@ public class BacktraceFormatter {
                 !context.getSourcePath(sourceSection.getSource()).contains("/lib/stdlib/rubygems");
     }
 
-    public BacktraceFormatter(RubyContext context, EnumSet<FormattingFlags> flags) {
+    public BacktraceFormatter(RubyContext context, RubyLanguage language, EnumSet<FormattingFlags> flags) {
         this.context = context;
+        this.language = language;
         this.flags = flags;
     }
 
@@ -114,7 +122,9 @@ public class BacktraceFormatter {
                 context.getCoreLibrary().truffleExceptionOperationsModule,
                 "get_formatted_backtrace",
                 rubyException);
-        final String formatted = fullMessage != null ? ((RubyString) fullMessage).getJavaString() : "<no message>";
+        final String formatted = fullMessage != null
+                ? RubyStringLibrary.getUncached().getJavaString(fullMessage)
+                : "<no message>";
         if (formatted.endsWith("\n")) {
             printer.print(formatted);
         } else {
@@ -162,10 +172,11 @@ public class BacktraceFormatter {
         for (int n = 0; n < lines.length; n++) {
             array[n] = StringOperations.createString(
                     context,
+                    language,
                     StringOperations.encodeRope(lines[n], UTF8Encoding.INSTANCE));
         }
 
-        return ArrayHelpers.createArray(context, array);
+        return ArrayHelpers.createArray(context, language, array);
     }
 
     @TruffleBoundary
@@ -360,7 +371,70 @@ public class BacktraceFormatter {
 
     public static String formatJavaThrowableMessage(Throwable t) {
         final String message = t.getMessage();
-        return (message != null ? message : "<no message>") + " (" + t.getClass().getSimpleName() + ")";
+        return (message != null ? message : "<no message>") + " (" + t.getClass().getCanonicalName() + ")";
+    }
+
+    @TruffleBoundary
+    public static void printInternalError(RubyContext context, Throwable throwable, String from) {
+        final PrintStream stream = BacktraceFormatter.printStreamFor(context.getEnv().err());
+        final BacktraceFormatter formatter = context.getDefaultBacktraceFormatter();
+        stream.println();
+        stream.println("truffleruby: " + from + ",");
+        stream.println("please report it to https://github.com/oracle/truffleruby/issues.");
+        stream.println();
+        stream.println("```");
+
+        boolean firstException = true;
+        Throwable t = throwable;
+
+        while (t != null) {
+            if (t.getClass().getSimpleName().equals("LazyStackTrace")) {
+                // Truffle's lazy stracktrace support, not a real exception
+                break;
+            }
+
+            if (!firstException) {
+                stream.println("Caused by:");
+            }
+
+            if (t instanceof RaiseException) {
+                // A Ruby exception as a cause of a Java or C-ext exception
+                final RubyException rubyException = ((RaiseException) t).getException();
+
+                final String formattedBacktrace = formatter
+                        .formatBacktrace(rubyException, rubyException.backtrace);
+                stream.println(formattedBacktrace);
+            } else {
+                stream.println(formatJavaThrowableMessage(t));
+
+                if (t instanceof AbstractTruffleException) {
+                    // Foreign exception
+                    stream.println(formatter.formatBacktrace(null, new Backtrace((AbstractTruffleException) t)));
+                } else {
+                    // Internal error, print it formatted like a Ruby exception
+                    printJavaStackTrace(stream, t);
+
+                    if (TruffleStackTrace.getStackTrace(t) != null) {
+                        stream.println(formatter.formatBacktrace(null, new Backtrace(t)));
+                    }
+                }
+            }
+
+            t = t.getCause();
+            firstException = false;
+        }
+
+        stream.println("```");
+    }
+
+    private static void printJavaStackTrace(PrintStream stream, Throwable t) {
+        final StackTraceElement[] stackTrace = t.getStackTrace();
+        for (StackTraceElement stackTraceElement : stackTrace) {
+            stream.println("\tfrom " + stackTraceElement);
+            if (BacktraceInterleaver.isCallBoundary(stackTraceElement)) {
+                break;
+            }
+        }
     }
 
 }

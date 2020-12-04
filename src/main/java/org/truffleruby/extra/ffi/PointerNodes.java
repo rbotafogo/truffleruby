@@ -11,11 +11,11 @@ package org.truffleruby.extra.ffi;
 
 import java.math.BigInteger;
 
+import com.oracle.truffle.api.library.CachedLibrary;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.object.Shape;
 import org.jcodings.specific.ASCIIEncoding;
 import org.truffleruby.RubyContext;
-import org.truffleruby.RubyLanguage;
 import org.truffleruby.builtins.CoreMethod;
 import org.truffleruby.builtins.CoreMethodArrayArgumentsNode;
 import org.truffleruby.builtins.CoreModule;
@@ -35,7 +35,7 @@ import org.truffleruby.language.Nil;
 import org.truffleruby.language.NotProvided;
 import org.truffleruby.language.Visibility;
 import org.truffleruby.language.control.RaiseException;
-import org.truffleruby.language.objects.AllocateHelperNode;
+import org.truffleruby.language.library.RubyStringLibrary;
 
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Cached;
@@ -76,11 +76,9 @@ public abstract class PointerNodes {
     @CoreMethod(names = { "__allocate__", "__layout_allocate__" }, constructor = true, visibility = Visibility.PRIVATE)
     public static abstract class AllocateNode extends UnaryCoreMethodNode {
 
-        @Child private AllocateHelperNode allocateNode = AllocateHelperNode.create();
-
         @Specialization
         protected RubyPointer allocate(RubyClass pointerClass) {
-            final Shape shape = allocateNode.getCachedShape(pointerClass);
+            final Shape shape = getLanguage().truffleFFIPointerShape;
             final RubyPointer instance = new RubyPointer(pointerClass, shape, Pointer.NULL);
             AllocationTracing.trace(instance, this);
             return instance;
@@ -93,7 +91,8 @@ public abstract class PointerNodes {
 
         @TruffleBoundary
         @Specialization
-        protected int findTypeSize(RubySymbol type) {
+        protected int findTypeSize(RubySymbol type,
+                @CachedLibrary(limit = "2") RubyStringLibrary stringLibrary) {
             final String typeString = type.getString();
             final int size = typeSize(typeString);
             if (size > 0) {
@@ -102,7 +101,7 @@ public abstract class PointerNodes {
                 final Object typedef = getContext()
                         .getTruffleNFI()
                         .resolveTypeRaw(getContext().getNativeConfiguration(), typeString);
-                final int typedefSize = typeSize(((RubyString) typedef).getJavaString());
+                final int typedefSize = typeSize(stringLibrary.getJavaString(typedef));
                 assert typedefSize > 0 : typedef;
                 return typedefSize;
             }
@@ -263,9 +262,8 @@ public abstract class PointerNodes {
         protected RubyString readNullPointer(long address, long limit) {
             final RubyString instance = new RubyString(
                     coreLibrary().stringClass,
-                    RubyLanguage.stringShape,
+                    getLanguage().stringShape,
                     false,
-                    true,
                     RopeConstants.EMPTY_ASCII_8BIT_ROPE);
             AllocationTracing.trace(instance, this);
             return instance;
@@ -282,9 +280,8 @@ public abstract class PointerNodes {
 
             final RubyString instance = new RubyString(
                     coreLibrary().stringClass,
-                    RubyLanguage.stringShape,
+                    getLanguage().stringShape,
                     false,
-                    true,
                     rope);
             AllocationTracing.trace(instance, this);
             return instance;
@@ -301,9 +298,8 @@ public abstract class PointerNodes {
 
             final RubyString instance = new RubyString(
                     coreLibrary().stringClass,
-                    RubyLanguage.stringShape,
+                    getLanguage().stringShape,
                     false,
-                    true,
                     rope);
             AllocationTracing.trace(instance, this);
             return instance;
@@ -323,8 +319,7 @@ public abstract class PointerNodes {
                 // No need to check the pointer address if we read nothing
                 final RubyString instance = new RubyString(
                         coreLibrary().stringClass,
-                        RubyLanguage.stringShape,
-                        false,
+                        getLanguage().stringShape,
                         false,
                         RopeConstants.EMPTY_ASCII_8BIT_ROPE);
                 AllocationTracing.trace(instance, this);
@@ -337,9 +332,8 @@ public abstract class PointerNodes {
                         .executeMake(bytes, ASCIIEncoding.INSTANCE, CodeRange.CR_UNKNOWN, NotProvided.INSTANCE);
                 final RubyString instance = new RubyString(
                         coreLibrary().stringClass,
-                        RubyLanguage.stringShape,
+                        getLanguage().stringShape,
                         false,
-                        true,
                         rope);
                 AllocationTracing.trace(instance, this);
                 return instance;
@@ -351,11 +345,12 @@ public abstract class PointerNodes {
     @Primitive(name = "pointer_write_bytes", lowerFixnum = { 2, 3 })
     public static abstract class PointerWriteBytesNode extends PointerPrimitiveArrayArgumentsNode {
 
-        @Specialization
-        protected RubyString writeBytes(long address, RubyString string, int index, int length,
-                @Cached RopeNodes.BytesNode bytesNode) {
+        @Specialization(guards = "libString.isRubyString(string)")
+        protected Object writeBytes(long address, Object string, int index, int length,
+                @Cached RopeNodes.BytesNode bytesNode,
+                @CachedLibrary(limit = "2") RubyStringLibrary libString) {
             final Pointer ptr = new Pointer(address);
-            final Rope rope = string.rope;
+            final Rope rope = libString.getRope(string);
             assert index + length <= rope.byteLength();
             if (length != 0) {
                 // No need to check the pointer address if we write nothing
@@ -504,7 +499,7 @@ public abstract class PointerNodes {
             final Pointer readPointer = ptr.readPointer(0);
             final RubyPointer instance = new RubyPointer(
                     coreLibrary().truffleFFIPointerClass,
-                    RubyLanguage.truffleFFIPointerShape,
+                    getLanguage().truffleFFIPointerShape,
                     readPointer);
             AllocationTracing.trace(instance, this);
             return instance;

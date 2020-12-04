@@ -9,38 +9,38 @@
  */
 package org.truffleruby.core.string;
 
-import org.truffleruby.RubyContext;
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import org.jcodings.Encoding;
 import org.truffleruby.collections.WeakValueCache;
+import org.truffleruby.core.rope.CodeRange;
+import org.truffleruby.core.rope.LeafRope;
 import org.truffleruby.core.rope.Rope;
+import org.truffleruby.core.rope.RopeCache;
 
 public class FrozenStringLiterals {
 
-    private final RubyContext context;
-    private final WeakValueCache<Rope, RubyString> values = new WeakValueCache<>();
+    private final RopeCache ropeCache;
+    private final WeakValueCache<LeafRope, ImmutableRubyString> values = new WeakValueCache<>();
 
-    public FrozenStringLiterals(RubyContext context) {
-        this.context = context;
+    public FrozenStringLiterals(RopeCache ropeCache) {
+        this.ropeCache = ropeCache;
     }
 
-    public RubyString getFrozenStringLiteral(Rope rope) {
-        final RubyString string = values.get(rope);
+    @TruffleBoundary
+    public ImmutableRubyString getFrozenStringLiteral(Rope rope) {
+        return getFrozenStringLiteral(rope.getBytes(), rope.getEncoding(), rope.getCodeRange());
+    }
+
+    @TruffleBoundary
+    public ImmutableRubyString getFrozenStringLiteral(byte[] bytes, Encoding encoding, CodeRange codeRange) {
+        // Ensure all ImmutableRubyString have a Rope from the RopeCache
+        final LeafRope cachedRope = ropeCache.getRope(bytes, encoding, codeRange);
+
+        final ImmutableRubyString string = values.get(cachedRope);
         if (string != null) {
             return string;
         } else {
-            return values.addInCacheIfAbsent(rope, StringOperations.createFrozenString(context, rope));
-        }
-    }
-
-    public RubyString getFrozenStringLiteral(RubyString string) {
-        assert string.frozen == true;
-
-        final Rope rope = string.rope;
-
-        final RubyString stringCached = values.get(rope);
-        if (stringCached != null) {
-            return stringCached;
-        } else {
-            return values.addInCacheIfAbsent(rope, string);
+            return values.addInCacheIfAbsent(cachedRope, new ImmutableRubyString(cachedRope));
         }
     }
 

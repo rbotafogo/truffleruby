@@ -1,5 +1,5 @@
 suite = {
-    "mxversion": "5.258.2",
+    "mxversion": "5.275.3",
     "name": "truffleruby",
 
     "imports": {
@@ -7,7 +7,7 @@ suite = {
             {
                 "name": "sulong",
                 "subdir": True,
-                "version": "97cc60491a9c18423c108f1e7aac8b03a45a1ebd",
+                "version": "ffa1646026187cbee466384b7e9f67e2cbc7192f",
                 "urls": [
                     {"url": "https://github.com/oracle/graal.git", "kind": "git"},
                     {"url": "https://curio.ssw.jku.at/nexus/content/repositories/snapshots", "kind": "binary"},
@@ -108,6 +108,7 @@ suite = {
         "org.truffleruby.annotations": {
             "dir": "src/annotations",
             "sourceDirs": ["java"],
+            "jacoco": "include",
             "javaCompliance": "8+",
             "checkstyle": "org.truffleruby",
             "workingSets": "TruffleRuby",
@@ -125,6 +126,7 @@ suite = {
             "annotationProcessors": [
                 "TRUFFLERUBY-PROCESSOR",
             ],
+            "jacoco": "include",
             "javaCompliance": "8+",
             "checkstyle": "org.truffleruby",
             "workingSets": "TruffleRuby",
@@ -139,6 +141,7 @@ suite = {
                 "truffleruby:TRUFFLERUBY-ANNOTATIONS",
                 "truffle:TRUFFLE_API",
             ],
+            "jacoco": "include",
             "javaCompliance": "8+",
             "checkstyle": "org.truffleruby",
             "workingSets": "TruffleRuby",
@@ -152,6 +155,7 @@ suite = {
             "dependencies": [
                 "sdk:GRAAL_SDK",
             ],
+            "jacoco": "include",
             "javaCompliance": "8+",
             "checkstyle": "org.truffleruby",
             "workingSets": "TruffleRuby",
@@ -175,6 +179,7 @@ suite = {
                 "truffle:TRUFFLE_DSL_PROCESSOR",
                 "TRUFFLERUBY-PROCESSOR",
             ],
+            "jacoco": "include",
             "javaCompliance": "8+",
             "checkstyle": "org.truffleruby",
             "workingSets": "TruffleRuby",
@@ -215,6 +220,7 @@ suite = {
                 "sdk:GRAAL_SDK",
                 "sdk:LAUNCHER_COMMON",
             ],
+            "jacoco": "include",
             "javaCompliance": "8+",
             "checkstyle": "org.truffleruby",
             "workingSets": "TruffleRuby",
@@ -251,7 +257,7 @@ suite = {
             "buildDependencies": [
                 "TRUFFLERUBY", # We need this jar to run extconf.rb
                 "TRUFFLERUBY-LAUNCHER", # We need this jar to run extconf.rb
-                "sulong:SULONG", # We need this jar to find the toolchain with Toolchain#getToolPath
+                "sulong:SULONG_NATIVE", # We need this jar to find the toolchain with Toolchain#getToolPath
             ],
             "license": ["EPL-2.0"],
         },
@@ -275,6 +281,7 @@ suite = {
                 "src/main/c/spawn-helper/spawn-helper",
                 "src/main/c/truffleposix/<lib:truffleposix>",
                 "src/main/c/cext/<lib:truffleruby>",
+                "src/main/c/bigdecimal/<extsuffix:bigdecimal>",
                 "src/main/c/etc/<extsuffix:etc>",
                 "src/main/c/nkf/<extsuffix:nkf>",
                 "src/main/c/openssl/<extsuffix:openssl>",
@@ -403,13 +410,7 @@ suite = {
                     "file:mx.truffleruby/native-image.properties",
                 ],
                 "bin/": [
-                    "file:bin/bundle",
-                    "file:bin/bundler",
-                    "file:bin/gem",
-                    "file:bin/irb",
-                    "file:bin/rake",
-                    "file:bin/rdoc",
-                    "file:bin/ri",
+                    "file:bin/*",
                 ],
                 "doc/": [
                     "file:doc/user",
@@ -441,6 +442,7 @@ suite = {
                     "file:lib/cext/include/*.h",
                 ],
                 "lib/mri/": [
+                    "dependency:org.truffleruby.cext/src/main/c/bigdecimal/<extsuffix:bigdecimal>",
                     "dependency:org.truffleruby.cext/src/main/c/etc/<extsuffix:etc>",
                     "dependency:org.truffleruby.cext/src/main/c/nkf/<extsuffix:nkf>",
                     "dependency:org.truffleruby.cext/src/main/c/openssl/<extsuffix:openssl>",

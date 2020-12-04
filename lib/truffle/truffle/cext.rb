@@ -270,10 +270,6 @@ module Truffle::CExt
     end
   end
 
-  def rb_tr_obj_infect(dest, source)
-    Primitive.infect(dest, source)
-  end
-
   FREEZE_METHOD = Kernel.instance_method :freeze
 
   def rb_obj_freeze(obj)
@@ -388,6 +384,10 @@ module Truffle::CExt
 
   def rb_obj_classname(object)
     object.class.name
+  end
+
+  def rb_class_of(object)
+    Primitive.class_of(object)
   end
 
   def rb_class_real(ruby_class)
@@ -678,7 +678,7 @@ module Truffle::CExt
 
   def rb_str_new_native(pointer, length)
     raise "#{pointer} not a pointer" unless Truffle::Interop.pointer?(pointer)
-    Truffle::FFI::Pointer.new(pointer).read_string(length).untaint
+    Truffle::FFI::Pointer.new(pointer).read_string(length)
   end
 
   def rb_enc_str_coderange(str)
@@ -1004,11 +1004,11 @@ module Truffle::CExt
   end
 
   def rb_yield(value)
-    Primitive.call_with_c_mutex(rb_block_proc, [value])
+    Primitive.interop_execute(rb_block_proc, [value])
   end
 
   def rb_yield_splat(values)
-    Primitive.call_with_c_mutex(rb_block_proc, values)
+    Primitive.interop_execute(rb_block_proc, values)
   end
 
   def rb_ivar_lookup(object, name, default_value)
@@ -1051,6 +1051,10 @@ module Truffle::CExt
 
   def rb_set_errinfo(error)
     Truffle::Type.set_last_exception(error)
+  end
+
+  def rb_make_exception(args)
+    Truffle::ExceptionOperations.make_exception(args)
   end
 
   def rb_errinfo
@@ -1161,7 +1165,9 @@ module Truffle::CExt
 
   def rb_enumeratorize_with_size(obj, meth, args, size_fn)
     return rb_enumeratorize(obj, meth, args) if size_fn.nil?
-    enum = obj.to_enum(meth, *args) { Primitive.cext_unwrap(Primitive.call_with_c_mutex(size_fn, [Primitive.cext_wrap(obj), Primitive.cext_wrap(args), Primitive.cext_wrap(enum)])) }
+    enum = obj.to_enum(meth, *args) do
+      Primitive.cext_unwrap(Primitive.call_with_c_mutex(size_fn, [Primitive.cext_wrap(obj), Primitive.cext_wrap(args), Primitive.cext_wrap(enum)]))
+    end
     enum
   end
 
@@ -1305,7 +1311,7 @@ module Truffle::CExt
 
   def rb_mutex_synchronize(mutex, func, arg)
     mutex.synchronize do
-      Primitive.cext_unwrap(Primitive.call_with_c_mutex(func, [Primitive.cext_wrap(arg)]))
+      Primitive.cext_unwrap(Primitive.interop_execute(func, [Primitive.cext_wrap(arg)]))
     end
   end
 
@@ -1461,29 +1467,29 @@ module Truffle::CExt
 
   def rb_ensure(b_proc, data1, e_proc, data2)
     begin
-      Primitive.call_with_c_mutex(b_proc, [data1])
+      Primitive.interop_execute(b_proc, [data1])
     ensure
-      Primitive.call_with_c_mutex(e_proc, [data2])
+      Primitive.interop_execute(e_proc, [data2])
     end
   end
 
   def rb_rescue(b_proc, data1, r_proc, data2)
     begin
-      Primitive.call_with_c_mutex(b_proc, [data1])
+      Primitive.interop_execute(b_proc, [data1])
     rescue StandardError => e
       if Truffle::Interop.null?(r_proc)
         Primitive.cext_wrap(nil)
       else
-        Primitive.call_with_c_mutex(r_proc, [data2, Primitive.cext_wrap(e)])
+        Primitive.interop_execute(r_proc, [data2, Primitive.cext_wrap(e)])
       end
     end
   end
 
   def rb_rescue2(b_proc, data1, r_proc, data2, rescued)
     begin
-      Primitive.call_with_c_mutex(b_proc, [data1])
+      Primitive.interop_execute(b_proc, [data1])
     rescue *rescued => e
-      Primitive.call_with_c_mutex(r_proc, [data2, Primitive.cext_wrap(e)])
+      Primitive.interop_execute(r_proc, [data2, Primitive.cext_wrap(e)])
     end
   end
 
@@ -1491,11 +1497,11 @@ module Truffle::CExt
     result = nil
 
     recursive = Truffle::ThreadOperations.detect_recursion(obj) do
-      result = Primitive.cext_unwrap(Primitive.call_with_c_mutex(func, [Primitive.cext_wrap(obj), Primitive.cext_wrap(arg), 0]))
+      result = Primitive.cext_unwrap(Primitive.interop_execute(func, [Primitive.cext_wrap(obj), Primitive.cext_wrap(arg), 0]))
     end
 
     if recursive
-      Primitive.cext_unwrap(Primitive.call_with_c_mutex(func, [Primitive.cext_wrap(obj), Primitive.cext_wrap(arg), 1]))
+      Primitive.cext_unwrap(Primitive.interop_execute(func, [Primitive.cext_wrap(obj), Primitive.cext_wrap(arg), 1]))
     else
       result
     end
@@ -1782,5 +1788,24 @@ module Truffle::CExt
 
   def test_cext_wrap(value)
     Primitive.cext_wrap(value)
+  end
+
+  # An object that once unreachable frees the associated native pointer using ruby_xfree()
+  class IMemoTmpBufAutoFree
+    def pointer=(address)
+      ObjectSpace.define_finalizer(self, self.class.free(address))
+    end
+
+    def self.free(address)
+      -> _id { LIBTRUFFLERUBY.ruby_xfree(address) }
+    end
+  end
+
+  def rb_imemo_tmpbuf_auto_free_pointer
+    IMemoTmpBufAutoFree.new
+  end
+
+  def rb_imemo_tmpbuf_set_ptr(obj, ptr)
+    obj.pointer = ptr
   end
 end

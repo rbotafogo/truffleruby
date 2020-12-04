@@ -2,23 +2,47 @@
 
 New features:
 
+* Updated to Ruby 2.7.2 (#2004).
 
 Bug fixes:
 
 * Fix error message when the method name is not a Symbol or String for `Kernel#respond_to?` (#2132, @ssnickolay)
 * Fixed setting of special variables in enumerators and enumerables (#1484).
-* Fix status and output when SystemExit is subclassed and raised (#2128)
-* Fix `String#{chomp, chomp!}` issue with invalid encoded strings (#2133).
+* Fixed return value of `Enumerable#count` and `Enumerable#uniq` with multiple yielded arguments (#2145, @LillianZ).
+* Fixed `String#unpack` for `w*` format (#2143).
+* Fixed issue with ``Kernel#` `` when invalid UTF-8 given (#2118).
+* Fixed issue with `Method#to_proc` and special variable storage (#2156).
 
 Compatibility:
 
 * Implement `String#undump` (#2131, @kustosz)
+* `Errno` constants with the same `errno` number are now the same class.
+* Implement `Enumerable#tally` and `Enumerable#filter_map` (#2144 and #2152, @LillianZ).
+* Implement `Range#minmax`.
+* Pass more `Enumerator::Lazy#uniq` and `Enumerator::Lazy#chunk` specs (#2146, @LillianZ).
+* Implement `Enumerator#produce` (#2160, @zverok)
+* Implement `Complex#<=>` (#2004, @ssnickolay).
+* Add warning for `proc` without block (#2004, @ssnickolay).
+* Implemented `FrozenError#receiver`.
+* `Proc#<<` and `Proc#>>` raises TypeError if passed not callable object (#2004, @ssnickolay).
+* Support time and date related messages for `Time` (#2166).
+* Updated `Dir.{glob,[]}` to raise `ArgumentError` for nul-separated strings.
+* `Kernel#lambda` with no block in a method called with a block raises an exception (#2004, @ssnickolay).
+* Implemented `BigDecimal` as C extension to improve compatibility.
+* Comment lines can be placed between fluent dot now (#2004, @ssnickolay).
+* Implemented `rb_make_exception`.
+* `**kwargs` now accept non-Symbol keys like Ruby 2.7.
+* Updated the Unicode Emoji version (#2173, @wildmaples).
+* Added `Enumerator::Yielder#to_proc`.
 
 Performance:
 
+* Refactor and implement more performant `MatchData#length` (#2147, @LillianZ).
+* Refactor and implement more performant `Array#sample` (#2148, @LillianZ).
 
 Changes:
 
+* All `InteropLibrary` messages are now exposed consistently as methods on `Truffle::Interop` (#2139). Some methods were renamed to match the scheme described in the documentation.
 
 # 20.3.0
 
@@ -42,6 +66,8 @@ Bug fixes:
 * Fixed constant/identifier detection in lexer for non-ASCII encodings (#2079, #2102, @ivoanjo).
 * Fixed parsing of `--jvm` as an application argument (#2108).
 * Fix `rb_rescue2` to ignore the end marker `(VALUE)0` (#2127, #2130).
+* Fix status and output when SystemExit is subclassed and raised (#2128)
+* Fix `String#{chomp, chomp!}` issue with invalid encoded strings (#2133).
 
 Compatibility:
 

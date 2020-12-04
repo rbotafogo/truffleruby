@@ -10,7 +10,6 @@
 package org.truffleruby.core.proc;
 
 import org.jcodings.specific.UTF8Encoding;
-import org.truffleruby.RubyLanguage;
 import org.truffleruby.builtins.CoreMethod;
 import org.truffleruby.builtins.CoreMethodArrayArgumentsNode;
 import org.truffleruby.builtins.CoreModule;
@@ -28,13 +27,13 @@ import org.truffleruby.core.string.StringNodes;
 import org.truffleruby.core.symbol.SymbolNodes;
 import org.truffleruby.language.NotProvided;
 import org.truffleruby.language.Visibility;
+import org.truffleruby.language.WarnNode;
 import org.truffleruby.language.arguments.ArgumentDescriptorUtils;
 import org.truffleruby.language.arguments.ReadCallerFrameNode;
 import org.truffleruby.language.arguments.RubyArguments;
 import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.dispatch.DispatchNode;
 import org.truffleruby.language.locals.FindDeclarationVariableNodes.FindAndReadDeclarationVariableNode;
-import org.truffleruby.language.objects.AllocateHelperNode;
 import org.truffleruby.language.objects.AllocationTracing;
 import org.truffleruby.language.yield.CallBlockNode;
 import org.truffleruby.parser.ArgumentDescriptor;
@@ -63,7 +62,6 @@ public abstract class ProcNodes {
 
     @CoreMethod(names = "new", constructor = true, needsBlock = true, rest = true)
     public abstract static class ProcNewNode extends CoreMethodArrayArgumentsNode {
-
         public static ProcNewNode create() {
             return ProcNodesFactory.ProcNewNodeFactory.create(null);
         }
@@ -74,7 +72,8 @@ public abstract class ProcNodes {
         protected RubyProc proc(VirtualFrame frame, RubyClass procClass, Object[] args, NotProvided block,
                 @Cached FindAndReadDeclarationVariableNode readNode,
                 @Cached ReadCallerFrameNode readCaller,
-                @Cached ProcNewNode recurseNode) {
+                @Cached ProcNewNode recurseNode,
+                @Cached("new()") WarnNode warnNode) {
             final MaterializedFrame parentFrame = readCaller.execute(frame);
 
             Object parentBlock = readNode.execute(parentFrame, TranslatorEnvironment.METHOD_BLOCK_NAME, nil);
@@ -82,6 +81,12 @@ public abstract class ProcNodes {
             if (parentBlock == nil) {
                 throw new RaiseException(getContext(), coreExceptions().argumentErrorProcWithoutBlock(this));
             } else {
+                if (warnNode.shouldWarnForDeprecation()) {
+                    warnNode.warningMessage(
+                            getContext().getCallStack().getTopMostUserSourceSection(),
+                            "Capturing the given block using Kernel#proc is deprecated; use `&block` instead");
+                }
+
                 final RubyProc proc = (RubyProc) parentBlock;
                 return recurseNode.executeProcNew(frame, procClass, args, proc);
             }
@@ -99,19 +104,18 @@ public abstract class ProcNodes {
 
         @Specialization(guards = "procClass != metaClass(block)")
         protected RubyProc procSpecial(RubyClass procClass, Object[] args, RubyProc block,
-                @Cached AllocateHelperNode allocateHelper,
                 @Cached DispatchNode initialize) {
             // Instantiate a new instance of procClass as classes do not correspond
 
             final RubyProc proc = new RubyProc(
                     procClass,
-                    allocateHelper.getCachedShape(procClass),
+                    getLanguage().procShape,
                     block.type,
                     block.sharedMethodInfo,
                     block.callTargetForType,
                     block.callTargetForLambdas,
                     block.declarationFrame,
-                    block.declarationStorage,
+                    block.declarationVariables,
                     block.method,
                     block.block,
                     block.frameOnStackMarker,
@@ -127,7 +131,7 @@ public abstract class ProcNodes {
         }
 
         protected Shape getProcShape() {
-            return RubyLanguage.procShape;
+            return getLanguage().procShape;
         }
 
         protected RubyClass metaClass(RubyProc object) {
@@ -139,18 +143,17 @@ public abstract class ProcNodes {
     public abstract static class DupNode extends UnaryCoreMethodNode {
 
         @Specialization
-        protected RubyProc dup(RubyProc proc,
-                @Cached AllocateHelperNode allocateHelper) {
+        protected RubyProc dup(RubyProc proc) {
             final RubyClass logicalClass = proc.getLogicalClass();
             final RubyProc copy = new RubyProc(
                     logicalClass,
-                    allocateHelper.getCachedShape(logicalClass),
+                    getLanguage().procShape,
                     proc.type,
                     proc.sharedMethodInfo,
                     proc.callTargetForType,
                     proc.callTargetForLambdas,
                     proc.declarationFrame,
-                    proc.declarationStorage,
+                    proc.declarationVariables,
                     proc.method,
                     proc.block,
                     proc.frameOnStackMarker,
@@ -177,7 +180,7 @@ public abstract class ProcNodes {
         protected RubyBinding binding(RubyProc proc) {
             final MaterializedFrame frame = proc.declarationFrame;
             final SourceSection sourceSection = proc.sharedMethodInfo.getSourceSection();
-            return BindingNodes.createBinding(getContext(), frame, sourceSection);
+            return BindingNodes.createBinding(getContext(), getLanguage(), frame, sourceSection);
         }
     }
 
@@ -265,13 +268,13 @@ public abstract class ProcNodes {
         protected RubyProc createSameArityProc(RubyProc userProc, RubyProc block) {
             final RubyProc composedProc = new RubyProc(
                     coreLibrary().procClass,
-                    RubyLanguage.procShape,
+                    getLanguage().procShape,
                     block.type,
                     userProc.sharedMethodInfo,
                     block.callTargetForType,
                     block.callTargetForLambdas,
                     block.declarationFrame,
-                    block.declarationStorage,
+                    block.declarationVariables,
                     block.method,
                     block.block,
                     block.frameOnStackMarker,

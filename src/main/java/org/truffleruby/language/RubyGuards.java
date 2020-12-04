@@ -23,10 +23,10 @@ import org.truffleruby.core.range.RubyIntRange;
 import org.truffleruby.core.range.RubyRange;
 import org.truffleruby.core.regexp.RubyMatchData;
 import org.truffleruby.core.regexp.RubyRegexp;
+import org.truffleruby.core.string.ImmutableRubyString;
 import org.truffleruby.core.string.RubyString;
 import org.truffleruby.core.symbol.RubySymbol;
 import org.truffleruby.interop.ToJavaStringNode;
-import org.truffleruby.stdlib.bigdecimal.RubyBigDecimal;
 
 public abstract class RubyGuards {
 
@@ -88,10 +88,6 @@ public abstract class RubyGuards {
         return value instanceof RubyBignum;
     }
 
-    public static boolean isRubyBigDecimal(Object value) {
-        return value instanceof RubyBigDecimal;
-    }
-
     public static boolean isIntRange(Object value) {
         return value instanceof RubyIntRange;
     }
@@ -120,8 +116,9 @@ public abstract class RubyGuards {
         return value instanceof RubyRegexp;
     }
 
-    public static boolean isRubyString(Object value) {
-        return value instanceof RubyString;
+    /** Use RubyStringLibrary to check if it's a String */
+    public static boolean isNotRubyString(Object value) {
+        return !(value instanceof ImmutableRubyString) && !(value instanceof RubyString);
     }
 
     public static boolean isRubySymbol(Object value) {
@@ -130,7 +127,7 @@ public abstract class RubyGuards {
 
     /** Should be used only for interop together with {@link ToJavaStringNode} */
     public static boolean isRubySymbolOrString(Object value) {
-        return isRubySymbol(value) || isRubyString(value);
+        return isRubySymbol(value) || value instanceof RubyString || value instanceof ImmutableRubyString;
     }
 
     public static boolean isRubyEncoding(Object object) {

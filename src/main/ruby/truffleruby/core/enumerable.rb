@@ -73,7 +73,7 @@ module Enumerable
   end
 
   def chunk_while(&block)
-    block = Proc.new(block)
+    raise ArgumentError, 'tried to create Proc object without a block' unless block
     Enumerator.new do |yielder|
       accumulator = nil
       prev = nil
@@ -114,7 +114,10 @@ module Enumerable
     seq = 0
     if !Primitive.undefined?(item)
       warn 'given block not used', uplevel: 1 if block_given?
-      each { |o| seq += 1 if item == o }
+      each do
+        o = Primitive.single_block_arg
+        seq += 1 if item == o
+      end
     elsif block_given?
       each { |o| seq += 1 if yield(o) }
     else
@@ -184,7 +187,6 @@ module Enumerable
         h[key] = [o]
       end
     end
-    Primitive.infect h, self
     h
   end
 
@@ -243,7 +245,7 @@ module Enumerable
   end
 
   def slice_when(&block)
-    block = Proc.new(block)
+    raise ArgumentError, 'tried to create Proc object without a block' unless block
     Enumerator.new do |yielder|
       accumulator = nil
       prev = nil
@@ -267,6 +269,19 @@ module Enumerable
     end
   end
 
+  def tally
+    h = {}
+    each do
+      e = Primitive.single_block_arg
+      if h.key?(e)
+        h[e] += 1
+      else
+        h[e] = 1
+      end
+    end
+    h
+  end
+
   def to_a(*arg)
     ary = []
     each(*arg) do
@@ -274,7 +289,6 @@ module Enumerable
       ary << o
       nil
     end
-    Primitive.infect ary, self
     ary
   end
   alias_method :entries, :to_a
@@ -537,7 +551,7 @@ module Enumerable
         i += 1
       end
     else
-      while true # rubocop:disable Lint/LiteralAsCondition
+      while true
         cache.each { |o| yield o }
       end
     end
@@ -911,6 +925,19 @@ module Enumerable
     ary
   end
 
+  def filter_map
+    return to_enum(:filter_map) { enumerator_size } unless block_given?
+
+    ary = []
+    each do
+      o = Primitive.single_block_arg
+      v = yield(o)
+      ary << v if v
+    end
+
+    ary
+  end
+
   def reverse_each(&block)
     return to_enum(:reverse_each) { enumerator_size } unless block_given?
 
@@ -960,7 +987,8 @@ module Enumerable
     result = []
     if block_given?
       h = {}
-      each do |e|
+      each do
+        e = Primitive.single_block_arg
         v = yield(e)
         unless h.key?(v)
           h[v] = true
@@ -969,7 +997,8 @@ module Enumerable
       end
     else
       h = {}
-      each do |e|
+      each do
+        e = Primitive.single_block_arg
         unless h.key?(e)
           h[e] = true
           result << e

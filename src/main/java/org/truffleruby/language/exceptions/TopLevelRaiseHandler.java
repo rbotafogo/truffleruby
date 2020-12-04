@@ -9,18 +9,17 @@
  */
 package org.truffleruby.language.exceptions;
 
-import com.oracle.truffle.api.object.DynamicObjectLibrary;
-import org.truffleruby.core.cast.IntegerCastNodeGen;
 import org.truffleruby.core.exception.RubyException;
+import org.truffleruby.core.exception.RubySystemExit;
 import org.truffleruby.core.kernel.AtExitManager;
 import org.truffleruby.core.thread.GetCurrentRubyThreadNode;
 import org.truffleruby.language.RubyContextNode;
+import org.truffleruby.language.backtrace.BacktraceFormatter;
 import org.truffleruby.language.control.ExitException;
 import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.dispatch.DispatchNode;
 
 import com.oracle.truffle.api.CompilerDirectives;
-import org.truffleruby.language.objects.IsANodeGen;
 
 public class TopLevelRaiseHandler extends RubyContextNode {
 
@@ -41,6 +40,12 @@ public class TopLevelRaiseHandler extends RubyContextNode {
         } catch (ExitException e) {
             // hard #exit!, return immediately, skip at_exit hooks
             return e.getCode();
+        } catch (RuntimeException | Error e) {
+            BacktraceFormatter.printInternalError(
+                    getContext(),
+                    e,
+                    "an internal exception escaped out of the interpreter");
+            return 1;
         }
 
         // Execute at_exit hooks (except if hard #exit!)
@@ -61,15 +66,20 @@ public class TopLevelRaiseHandler extends RubyContextNode {
         } catch (ExitException e) {
             // hard #exit! during at_exit: ignore the main script exception
             exitCode = e.getCode();
+        } catch (RuntimeException | Error e) { // Internal error
+            BacktraceFormatter.printInternalError(
+                    getContext(),
+                    e,
+                    "an internal exception escaped out of the interpreter");
+            return 1;
         }
 
         return exitCode;
     }
 
     private int statusFromException(RubyException exception) {
-        if (IsANodeGen.getUncached().executeIsA(exception, coreLibrary().systemExitClass)) {
-            final Object status = DynamicObjectLibrary.getUncached().getOrDefault(exception, "@status", null);
-            return IntegerCastNodeGen.getUncached().executeCastInt(status);
+        if (exception instanceof RubySystemExit) {
+            return ((RubySystemExit) exception).exitStatus;
         } else {
             return 1;
         }

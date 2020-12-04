@@ -11,7 +11,6 @@ package org.truffleruby.language.dispatch;
 
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.RootCallTarget;
-import com.oracle.truffle.api.frame.MaterializedFrame;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.interop.TruffleObject;
 import com.oracle.truffle.api.nodes.DirectCallNode;
@@ -24,7 +23,7 @@ import org.truffleruby.core.exception.ExceptionOperations;
 import org.truffleruby.core.klass.RubyClass;
 import org.truffleruby.core.proc.RubyProc;
 import org.truffleruby.core.symbol.RubySymbol;
-import org.truffleruby.language.FrameOrStorageSendingNode;
+import org.truffleruby.language.FrameAndVariablesSendingNode;
 import org.truffleruby.language.RubyRootNode;
 import org.truffleruby.language.arguments.RubyArguments;
 import org.truffleruby.language.control.RaiseException;
@@ -36,10 +35,9 @@ import org.truffleruby.language.methods.LookupMethodNode;
 import org.truffleruby.language.methods.LookupMethodNodeGen;
 import org.truffleruby.language.objects.MetaClassNode;
 import org.truffleruby.language.objects.MetaClassNodeGen;
-import org.truffleruby.language.threadlocal.SpecialVariableStorage;
 import org.truffleruby.options.Options;
 
-public class DispatchNode extends FrameOrStorageSendingNode {
+public class DispatchNode extends FrameAndVariablesSendingNode implements DispatchingNode {
 
     private static final class Missing implements TruffleObject {
     }
@@ -80,7 +78,6 @@ public class DispatchNode extends FrameOrStorageSendingNode {
     @Child protected ToSymbolNode toSymbol;
 
     protected final ConditionProfile methodMissing;
-    protected final ConditionProfile isForeignCall;
     protected final BranchProfile methodMissingMissing;
 
     protected DispatchNode(
@@ -89,14 +86,12 @@ public class DispatchNode extends FrameOrStorageSendingNode {
             LookupMethodNode methodLookup,
             CallInternalMethodNode callNode,
             ConditionProfile methodMissing,
-            ConditionProfile isForeignCall,
             BranchProfile methodMissingMissing) {
         this.config = config;
         this.metaclassNode = metaclassNode;
         this.methodLookup = methodLookup;
         this.callNode = callNode;
         this.methodMissing = methodMissing;
-        this.isForeignCall = isForeignCall;
         this.methodMissingMissing = methodMissingMissing;
     }
 
@@ -106,7 +101,6 @@ public class DispatchNode extends FrameOrStorageSendingNode {
                 MetaClassNode.create(),
                 LookupMethodNode.create(),
                 CallInternalMethodNode.create(),
-                ConditionProfile.create(),
                 ConditionProfile.create(),
                 BranchProfile.create());
     }
@@ -124,12 +118,7 @@ public class DispatchNode extends FrameOrStorageSendingNode {
     }
 
     public Object execute(VirtualFrame frame, Object receiver, String methodName, RubyProc block, Object[] arguments) {
-
         final RubyClass metaclass = metaclassNode.execute(receiver);
-
-        if (isForeignCall.profile(metaclass == getContext().getCoreLibrary().truffleInteropForeignClass)) {
-            return callForeign(receiver, methodName, block, arguments);
-        }
 
         final InternalMethod method = methodLookup.execute(frame, metaclass, methodName, config);
 
@@ -138,14 +127,18 @@ public class DispatchNode extends FrameOrStorageSendingNode {
                 case RETURN_MISSING:
                     return MISSING;
                 case CALL_METHOD_MISSING:
-                    return callMethodMissing(frame, receiver, methodName, block, arguments);
+                    // Both branches implicitly profile through lazy node creation
+                    if (metaclass == getContext().getCoreLibrary().truffleInteropForeignClass) {
+                        return callForeign(receiver, methodName, block, arguments);
+                    } else {
+                        return callMethodMissing(frame, receiver, methodName, block, arguments);
+                    }
             }
         }
 
-        final MaterializedFrame callerFrame = getFrameIfRequired(frame);
-        final SpecialVariableStorage callerStorage = getStorageIfRequired(frame);
+        final Object callerFrameOrStorage = getFrameOrStorageIfRequired(frame);
         final Object[] frameArguments = RubyArguments
-                .pack(null, callerFrame, callerStorage, method, null, receiver, block, arguments);
+                .pack(null, callerFrameOrStorage, method, null, receiver, block, arguments);
 
         return callNode.execute(method, frameArguments);
     }
@@ -242,7 +235,6 @@ public class DispatchNode extends FrameOrStorageSendingNode {
                     MetaClassNodeGen.getUncached(),
                     LookupMethodNodeGen.getUncached(),
                     CallInternalMethodNodeGen.getUncached(),
-                    ConditionProfile.getUncached(),
                     ConditionProfile.getUncached(),
                     BranchProfile.getUncached());
         }

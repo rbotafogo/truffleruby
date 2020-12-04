@@ -29,7 +29,6 @@ public abstract class ProcOperations {
         return RubyArguments.pack(
                 proc.declarationFrame,
                 null,
-                null,
                 proc.method,
                 proc.frameOnStackMarker,
                 getSelf(proc),
@@ -58,7 +57,7 @@ public abstract class ProcOperations {
             RootCallTarget callTargetForProcs,
             RootCallTarget callTargetForLambdas,
             MaterializedFrame declarationFrame,
-            SpecialVariableStorage storage,
+            SpecialVariableStorage variables,
             InternalMethod method,
             RubyProc block,
             FrameOnStackMarker frameOnStackMarker,
@@ -85,7 +84,7 @@ public abstract class ProcOperations {
                 callTargetForType,
                 callTargetForLambdas,
                 declarationFrame,
-                storage,
+                variables,
                 method,
                 block,
                 frameOnStackMarker,
@@ -94,16 +93,16 @@ public abstract class ProcOperations {
         // TODO(norswap, 04 Aug 2020): do allocation tracing (normally via AllocateHelper)?
     }
 
-    public static RubyProc createLambdaFromBlock(RubyContext context, RubyProc block) {
+    public static RubyProc createLambdaFromBlock(RubyContext context, RubyLanguage language, RubyProc block) {
         return ProcOperations.createRubyProc(
                 context.getCoreLibrary().procClass,
-                RubyLanguage.procShape,
+                language.procShape,
                 ProcType.LAMBDA,
                 block.sharedMethodInfo,
                 block.callTargetForLambdas,
                 block.callTargetForLambdas,
                 block.declarationFrame,
-                block.declarationStorage,
+                block.declarationVariables,
                 block.method,
                 block.block,
                 null,

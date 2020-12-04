@@ -880,6 +880,9 @@ public class RubyLexer implements MagicCommentHandler {
                             case '\13': /* '\v' */
                                 spaceSeen = true;
                                 continue;
+                            case '#':
+                                pushback(c);
+                                continue loop;
                             case '&':
                             case '.': {
                                 if (peek('.') == (c == '&')) {
@@ -1689,15 +1692,16 @@ public class RubyLexer implements MagicCommentHandler {
     private int dot() {
         int c;
 
+        final boolean isBeg = isBEG();
         setState(EXPR_BEG);
         if ((c = nextc()) == '.') {
             if ((c = nextc()) == '.') {
                 yaccValue = RopeConstants.DOT_DOT_DOT;
-                return RubyParser.tDOT3;
+                return isBeg ? RubyParser.tBDOT3 : RubyParser.tDOT3;
             }
             pushback(c);
             yaccValue = RopeConstants.DOT_DOT;
-            return RubyParser.tDOT2;
+            return isBeg ? RubyParser.tBDOT2 : RubyParser.tDOT2;
         }
 
         pushback(c);

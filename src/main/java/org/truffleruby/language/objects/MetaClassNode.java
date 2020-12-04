@@ -14,6 +14,7 @@ import org.truffleruby.RubyLanguage;
 import org.truffleruby.core.klass.RubyClass;
 import org.truffleruby.core.numeric.RubyBignum;
 import org.truffleruby.core.symbol.RubySymbol;
+import org.truffleruby.core.string.ImmutableRubyString;
 import org.truffleruby.language.Nil;
 import org.truffleruby.language.RubyBaseNode;
 import org.truffleruby.language.RubyDynamicObject;
@@ -28,6 +29,10 @@ public abstract class MetaClassNode extends RubyBaseNode {
 
     public static MetaClassNode create() {
         return MetaClassNodeGen.create();
+    }
+
+    public static MetaClassNode getUncached() {
+        return MetaClassNodeGen.getUncached();
     }
 
     public abstract RubyClass execute(Object value);
@@ -81,6 +86,13 @@ public abstract class MetaClassNode extends RubyBaseNode {
             @CachedContext(RubyLanguage.class) RubyContext context) {
         return context.getCoreLibrary().symbolClass;
     }
+
+    @Specialization
+    protected RubyClass metaClassImmutableString(ImmutableRubyString value,
+            @CachedContext(RubyLanguage.class) RubyContext context) {
+        return context.getCoreLibrary().stringClass;
+    }
+
 
     // Cover all RubyDynamicObject cases with cached and uncached
 

@@ -14,6 +14,7 @@ import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.oracle.truffle.api.library.CachedLibrary;
 import org.jcodings.Encoding;
 import org.jcodings.specific.ASCIIEncoding;
 import org.jcodings.specific.USASCIIEncoding;
@@ -22,11 +23,7 @@ import org.joni.Matcher;
 import org.joni.Option;
 import org.joni.Regex;
 import org.joni.Region;
-import org.joni.Syntax;
-import org.joni.exception.SyntaxException;
-import org.joni.exception.ValueException;
 import org.truffleruby.RubyContext;
-import org.truffleruby.RubyLanguage;
 import org.truffleruby.builtins.CoreMethod;
 import org.truffleruby.builtins.CoreMethodArrayArgumentsNode;
 import org.truffleruby.builtins.CoreModule;
@@ -36,7 +33,6 @@ import org.truffleruby.collections.ConcurrentOperations;
 import org.truffleruby.core.array.ArrayBuilderNode;
 import org.truffleruby.core.array.ArrayBuilderNode.BuilderState;
 import org.truffleruby.core.array.RubyArray;
-import org.truffleruby.core.cast.TaintResultNode;
 import org.truffleruby.core.hash.ReHashable;
 import org.truffleruby.core.kernel.KernelNodes.SameOrEqualNode;
 import org.truffleruby.core.regexp.RegexpNodes.ToSNode;
@@ -51,7 +47,6 @@ import org.truffleruby.core.string.StringNodes;
 import org.truffleruby.core.string.StringNodes.StringAppendPrimitiveNode;
 import org.truffleruby.core.string.StringOperations;
 import org.truffleruby.language.RubyContextNode;
-import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.dispatch.DispatchNode;
 
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -61,8 +56,8 @@ import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.profiles.ConditionProfile;
+import org.truffleruby.language.library.RubyStringLibrary;
 import org.truffleruby.language.objects.AllocationTracing;
-
 
 @CoreModule("Truffle::RegexpOperations")
 public class TruffleRegexpNodes {
@@ -101,17 +96,7 @@ public class TruffleRegexpNodes {
         final RopeBuilder preprocessed = ClassicRegexp
                 .preprocess(context, sourceRope, enc, fixedEnc, RegexpSupport.ErrorMode.RAISE);
         final RegexpOptions options = regexp.options;
-        try {
-            return new Regex(
-                    preprocessed.getUnsafeBytes(),
-                    0,
-                    preprocessed.getLength(),
-                    options.toJoniOptions(),
-                    enc,
-                    new RegexWarnCallback(context));
-        } catch (SyntaxException e) {
-            throw new RaiseException(context, context.getCoreExceptions().regexpError(e.getMessage(), currentNode));
-        }
+        return ClassicRegexp.makeRegexp(context, preprocessed, options, enc, sourceRope, currentNode);
     }
 
     @CoreMethod(names = "union", onSingleton = true, required = 2, rest = true)
@@ -122,20 +107,23 @@ public class TruffleRegexpNodes {
         @Child DispatchNode copyNode = DispatchNode.create();
         @Child private SameOrEqualNode sameOrEqualNode = SameOrEqualNode.create();
         @Child private StringNodes.MakeStringNode makeStringNode = StringNodes.MakeStringNode.create();
+        @Child private RubyStringLibrary rubyStringLibrary = RubyStringLibrary.getFactory().createDispatched(2);
 
-        @Specialization(guards = "argsMatch(frame, cachedArgs, args)", limit = "getDefaultCacheLimit()")
-        protected Object executeFastUnion(VirtualFrame frame, RubyString str, RubyString sep, Object[] args,
+        @Specialization(
+                guards = "argsMatch(frame, cachedArgs, args)",
+                limit = "getDefaultCacheLimit()")
+        protected Object executeFastUnion(VirtualFrame frame, RubyString str, Object sep, Object[] args,
                 @Cached(value = "args", dimensions = 1) Object[] cachedArgs,
                 @Cached("buildUnion(str, sep, args)") RubyRegexp union) {
             return copyNode.call(union, "clone");
         }
 
         @Specialization(replaces = "executeFastUnion")
-        protected Object executeSlowUnion(RubyString str, RubyString sep, Object[] args) {
+        protected Object executeSlowUnion(RubyString str, Object sep, Object[] args) {
             return buildUnion(str, sep, args);
         }
 
-        public RubyRegexp buildUnion(RubyString str, RubyString sep, Object[] args) {
+        public RubyRegexp buildUnion(RubyString str, Object sep, Object[] args) {
             RubyString regexpString = null;
             for (int i = 0; i < args.length; i++) {
                 if (regexpString == null) {
@@ -148,9 +136,9 @@ public class TruffleRegexpNodes {
             return createRegexp(regexpString.rope);
         }
 
-        public RubyString string(Object obj) {
-            if (obj instanceof RubyString) {
-                final Rope rope = ((RubyString) obj).rope;
+        public Object string(Object obj) {
+            if (rubyStringLibrary.isRubyString(obj)) {
+                final Rope rope = rubyStringLibrary.getRope(obj);
                 return makeStringNode.fromRope(ClassicRegexp.quote19(rope));
             } else {
                 return toSNode.execute((RubyRegexp) obj);
@@ -178,7 +166,7 @@ public class TruffleRegexpNodes {
 
             return new RubyRegexp(
                     getContext().getCoreLibrary().regexpClass,
-                    RubyLanguage.regexpShape,
+                    getLanguage().regexpShape,
                     regex,
                     (Rope) regex.getUserObject(),
                     regexpOptions,
@@ -195,7 +183,7 @@ public class TruffleRegexpNodes {
             int n = 0;
             for (Entry<T, AtomicInteger> e : map.entrySet()) {
                 Rope key = StringOperations.encodeRope(e.getKey().toString(), UTF8Encoding.INSTANCE);
-                arrayBuilderNode.appendValue(state, n++, StringOperations.createString(context, key));
+                arrayBuilderNode.appendValue(state, n++, StringOperations.createString(context, getLanguage(), key));
                 arrayBuilderNode.appendValue(state, n++, e.getValue().get());
             }
             return createArray(arrayBuilderNode.finish(state, n), n);
@@ -262,18 +250,19 @@ public class TruffleRegexpNodes {
          * @param startPos The position within the string which the matcher should consider the start. Setting this to
          *            the from position allows scanners to match starting partway through a string while still setting
          *            atStart and thus forcing the match to be at the specific starting position. */
-        @Specialization
+        @Specialization(guards = "libString.isRubyString(string)")
         protected Object matchInRegion(
                 RubyRegexp regexp,
-                RubyString string,
+                Object string,
                 int fromPos,
                 int toPos,
                 boolean atStart,
                 boolean encodingConversion,
                 int startPos,
                 @Cached RopeNodes.BytesNode bytesNode,
-                @Cached TruffleRegexpNodes.MatchNode matchNode) {
-            Rope rope = string.rope;
+                @Cached TruffleRegexpNodes.MatchNode matchNode,
+                @CachedLibrary(limit = "2") RubyStringLibrary libString) {
+            Rope rope = libString.getRope(string);
             Matcher matcher = createMatcher(
                     getContext(),
                     regexp,
@@ -288,14 +277,13 @@ public class TruffleRegexpNodes {
 
     public static abstract class MatchNode extends RubyContextNode {
 
-        @Child private TaintResultNode taintResultNode = new TaintResultNode();
         @Child private DispatchNode dupNode = DispatchNode.create();
 
         public static MatchNode create() {
             return MatchNodeGen.create();
         }
 
-        public abstract Object execute(RubyRegexp regexp, RubyString string, Matcher matcher,
+        public abstract Object execute(RubyRegexp regexp, Object string, Matcher matcher,
                 int startPos, int range, boolean onlyMatchAtStart);
 
         // Creating a MatchData will store a copy of the source string. It's tempting to use a rope here, but a bit
@@ -312,7 +300,7 @@ public class TruffleRegexpNodes {
         @Specialization
         protected Object executeMatch(
                 RubyRegexp regexp,
-                RubyString string,
+                Object string,
                 Matcher matcher,
                 int startPos,
                 int range,
@@ -334,13 +322,13 @@ public class TruffleRegexpNodes {
             final RubyString dupedString = (RubyString) dupNode.call(string, "dup");
             RubyMatchData result = new RubyMatchData(
                     coreLibrary().matchDataClass,
-                    RubyLanguage.matchDataShape,
+                    getLanguage().matchDataShape,
                     regexp,
                     dupedString,
                     region,
                     null);
             AllocationTracing.trace(result, this);
-            return taintResultNode.maybeTaint(string, result);
+            return result;
         }
 
         @TruffleBoundary
@@ -358,9 +346,9 @@ public class TruffleRegexpNodes {
         }
 
         @TruffleBoundary
-        protected void instrument(RubyRegexp regexp, RubyString string, boolean fromStart) {
+        protected void instrument(RubyRegexp regexp, Object string, boolean fromStart) {
             Rope source = regexp.source;
-            Encoding enc = string.rope.getEncoding();
+            Encoding enc = RubyStringLibrary.getUncached().getRope(string).getEncoding();
             RegexpOptions options = regexp.options;
             MatchInfo matchInfo = new MatchInfo(
                     new RegexpCacheKey(
@@ -430,45 +418,28 @@ public class TruffleRegexpNodes {
     /** WARNING: computeRegexpEncoding() mutates options, so the caller should make sure it's a copy */
     @TruffleBoundary
     public static Regex compile(RubyContext context, Rope bytes, RegexpOptions options, Node currentNode) {
-        try {
-            if (options.isEncodingNone()) {
-                bytes = RopeOperations.withEncoding(bytes, ASCIIEncoding.INSTANCE);
-            }
-            Encoding enc = bytes.getEncoding();
-            Encoding[] fixedEnc = new Encoding[]{ null };
-            RopeBuilder unescaped = ClassicRegexp
-                    .preprocess(context, bytes, enc, fixedEnc, RegexpSupport.ErrorMode.RAISE);
-            enc = ClassicRegexp.computeRegexpEncoding(options, enc, fixedEnc, context);
-
-            Regex regexp = new Regex(
-                    unescaped.getUnsafeBytes(),
-                    0,
-                    unescaped.getLength(),
-                    options.toJoniOptions(),
-                    enc,
-                    Syntax.RUBY,
-                    new RegexWarnCallback(context));
-            regexp.setUserObject(RopeOperations.withEncoding(bytes, enc));
-
-            if (context.getOptions().REGEXP_INSTRUMENT_CREATION) {
-                final RegexpCacheKey key = new RegexpCacheKey(
-                        bytes,
-                        enc,
-                        options.toJoniOptions(),
-                        context.getHashing(REHASH_COMPILED_REGEXPS));
-                ConcurrentOperations.getOrCompute(compiledRegexps, key, x -> new AtomicInteger()).incrementAndGet();
-            }
-
-            return regexp;
-        } catch (ValueException e) {
-            throw new RaiseException(
-                    context,
-                    context.getCoreExceptions().regexpError(
-                            e.getMessage() + ": " + '/' + RopeOperations.decodeRope(bytes) + '/',
-                            currentNode));
-        } catch (SyntaxException e) {
-            throw new RaiseException(context, context.getCoreExceptions().regexpError(e.getMessage(), currentNode));
+        if (options.isEncodingNone()) {
+            bytes = RopeOperations.withEncoding(bytes, ASCIIEncoding.INSTANCE);
         }
+        Encoding enc = bytes.getEncoding();
+        Encoding[] fixedEnc = new Encoding[]{ null };
+        RopeBuilder unescaped = ClassicRegexp
+                .preprocess(context, bytes, enc, fixedEnc, RegexpSupport.ErrorMode.RAISE);
+        enc = ClassicRegexp.computeRegexpEncoding(options, enc, fixedEnc, context);
+
+        Regex regexp = ClassicRegexp.makeRegexp(context, unescaped, options, enc, bytes, currentNode);
+        regexp.setUserObject(RopeOperations.withEncoding(bytes, enc));
+
+        if (context.getOptions().REGEXP_INSTRUMENT_CREATION) {
+            final RegexpCacheKey key = new RegexpCacheKey(
+                    bytes,
+                    enc,
+                    options.toJoniOptions(),
+                    context.getHashing(REHASH_COMPILED_REGEXPS));
+            ConcurrentOperations.getOrCompute(compiledRegexps, key, x -> new AtomicInteger()).incrementAndGet();
+        }
+
+        return regexp;
     }
 
 }

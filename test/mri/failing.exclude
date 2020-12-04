@@ -39,9 +39,13 @@ ruby/test_parse.rb # encoding
 rubygems/test_gem_security.rb # hangs
 io/wait/test_io_wait_uncommon.rb # unreliable in parallel
 
+# Pattern matching
+ruby/test_pattern_matching.rb
+
 # Too slow
 
 test_extlibs.rb
+racc/test_racc_command.rb
 
 # Other issues
 
@@ -172,7 +176,6 @@ ruby/test_rubyvm.rb
 ruby/test_settracefunc.rb # uninitialized constant TestSetTraceFunc::TracePoint
 ruby/test_sleep.rb #  cannot load such file -- etc
 ruby/test_sprintf_comb.rb # almost all failing / regression
-ruby/test_syntax.rb # refinements
 ruby/test_threadgroup.rb
 rubygems/test_gem_remote_fetcher.rb # OpenSSL problems
 rubygems/test_gem_request_set_gem_dependency_api.rb # Expects TRUFFLERUBY_VERSION to exist and other problems
@@ -188,3 +191,4 @@ xmlrpc/test_client.rb # pollutes other tests
 xmlrpc/test_cookie.rb # undefined method `http' for NilClass
 xmlrpc/test_parser.rb # `const_missing': uninitialized constant Test_REXMLStreamParser::GenericParserTest
 xmlrpc/test_webrick_server.rb # undefined method `<<' for Object
+ruby/test_bignum.rb # relies on Bignums on Fixnum range

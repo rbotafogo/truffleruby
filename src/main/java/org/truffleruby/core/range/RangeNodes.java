@@ -9,7 +9,6 @@
  */
 package org.truffleruby.core.range;
 
-import org.truffleruby.RubyLanguage;
 import org.truffleruby.builtins.CoreMethod;
 import org.truffleruby.builtins.CoreMethodArrayArgumentsNode;
 import org.truffleruby.builtins.CoreMethodNode;
@@ -21,7 +20,6 @@ import org.truffleruby.builtins.UnaryCoreMethodNode;
 import org.truffleruby.builtins.YieldingCoreMethodNode;
 import org.truffleruby.core.array.ArrayBuilderNode;
 import org.truffleruby.core.array.ArrayBuilderNode.BuilderState;
-import org.truffleruby.core.array.ArrayHelpers;
 import org.truffleruby.core.array.RubyArray;
 import org.truffleruby.core.cast.BooleanCastWithDefaultNodeGen;
 import org.truffleruby.core.cast.ToIntNode;
@@ -34,7 +32,6 @@ import org.truffleruby.language.RubyNode;
 import org.truffleruby.language.Visibility;
 import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.dispatch.DispatchNode;
-import org.truffleruby.language.objects.AllocateHelperNode;
 import org.truffleruby.language.objects.AllocationTracing;
 import org.truffleruby.language.yield.YieldNode;
 
@@ -49,7 +46,6 @@ import com.oracle.truffle.api.nodes.LoopNode;
 import com.oracle.truffle.api.object.Shape;
 import com.oracle.truffle.api.profiles.BranchProfile;
 import com.oracle.truffle.api.profiles.ConditionProfile;
-
 
 @CoreModule(value = "Range", isClass = true)
 public abstract class RangeNodes {
@@ -67,7 +63,7 @@ public abstract class RangeNodes {
             final boolean excludedEnd = range.excludedEnd;
             int exclusiveEnd = excludedEnd ? end : end + 1;
             if (noopProfile.profile(begin >= exclusiveEnd)) {
-                return ArrayHelpers.createEmptyArray(getContext());
+                return createEmptyArray();
             }
 
             final int length = exclusiveEnd - begin;
@@ -204,7 +200,7 @@ public abstract class RangeNodes {
         @Specialization
         protected RubyIntRange dupIntRange(RubyIntRange range) {
             // RubyIntRange means this isn't a Range subclass (cf. NewNode), we can use the shape directly.
-            final Shape shape = RubyLanguage.intRangeShape;
+            final Shape shape = getLanguage().intRangeShape;
             final RubyIntRange copy = new RubyIntRange(
                     coreLibrary().rangeClass,
                     shape,
@@ -218,7 +214,7 @@ public abstract class RangeNodes {
         @Specialization
         protected RubyLongRange dupLongRange(RubyLongRange range) {
             // RubyLongRange means this isn't a Range subclass (cf. NewNode), we can use the shape directly.
-            final Shape shape = RubyLanguage.longRangeShape;
+            final Shape shape = getLanguage().longRangeShape;
             final RubyLongRange copy = new RubyLongRange(
                     coreLibrary().rangeClass,
                     shape,
@@ -230,13 +226,11 @@ public abstract class RangeNodes {
         }
 
         @Specialization
-        protected RubyObjectRange dup(RubyObjectRange range,
-                @Cached AllocateHelperNode allocateHelperNode) {
+        protected RubyObjectRange dup(RubyObjectRange range) {
             final RubyClass logicalClass = range.getLogicalClass();
-            final Shape shape = allocateHelperNode.getCachedShape(logicalClass);
             final RubyObjectRange copy = new RubyObjectRange(
                     logicalClass,
-                    shape,
+                    getLanguage().objectRangeShape,
                     range.excludedEnd,
                     range.begin,
                     range.end);
@@ -344,7 +338,7 @@ public abstract class RangeNodes {
             final int length = result - begin;
 
             if (length < 0) {
-                return ArrayHelpers.createEmptyArray(getContext());
+                return createEmptyArray();
             } else {
                 final int[] values = new int[length];
 
@@ -366,10 +360,17 @@ public abstract class RangeNodes {
             return toAInternalCall.call(range, "to_a_internal");
         }
 
-        @Specialization(guards = "range.isEndless()")
+        @Specialization(guards = "range.isEndless() || range.isBoundless()")
         protected Object endlessToA(RubyObjectRange range) {
             throw new RaiseException(getContext(), coreExceptions().rangeError(
                     "cannot convert endless range to an array",
+                    this));
+        }
+
+        @Specialization(guards = "range.isBeginless()")
+        protected Object beginlessToA(RubyObjectRange range) {
+            throw new RaiseException(getContext(), coreExceptions().typeError(
+                    "can't iterate from NilClass",
                     this));
         }
     }
@@ -392,7 +393,7 @@ public abstract class RangeNodes {
             int end = toInt(range.end);
             return new RubyIntRange(
                     coreLibrary().rangeClass,
-                    RubyLanguage.intRangeShape,
+                    getLanguage().intRangeShape,
                     range.excludedEnd,
                     begin,
                     end);
@@ -404,7 +405,7 @@ public abstract class RangeNodes {
             int end = toInt(range.end);
             return new RubyIntRange(
                     coreLibrary().rangeClass,
-                    RubyLanguage.intRangeShape,
+                    getLanguage().intRangeShape,
                     range.excludedEnd,
                     begin,
                     end);
@@ -415,9 +416,33 @@ public abstract class RangeNodes {
             int end = array.size;
             return new RubyIntRange(
                     coreLibrary().rangeClass,
-                    RubyLanguage.intRangeShape,
+                    getLanguage().intRangeShape,
                     true,
                     toInt(range.begin),
+                    end);
+        }
+
+        @Specialization(guards = "range.isBeginless()")
+        protected RubyIntRange beginlessObjectRange(RubyObjectRange range, RubyArray array) {
+            int begin = 0;
+            int end = toInt(range.end);
+            return new RubyIntRange(
+                    coreLibrary().rangeClass,
+                    getLanguage().intRangeShape,
+                    range.excludedEnd,
+                    begin,
+                    end);
+        }
+
+        @Specialization(guards = "range.isBoundless()")
+        protected RubyIntRange nilNilObjectRange(RubyObjectRange range, RubyArray array) {
+            int begin = 0;
+            int end = array.size;
+            return new RubyIntRange(
+                    coreLibrary().rangeClass,
+                    getLanguage().intRangeShape,
+                    false,
+                    begin,
                     end);
         }
 
@@ -459,7 +484,7 @@ public abstract class RangeNodes {
             // Not a Range subclass, we can use the shape directly.
             final RubyIntRange range = new RubyIntRange(
                     coreLibrary().rangeClass,
-                    RubyLanguage.intRangeShape,
+                    getLanguage().intRangeShape,
                     excludeEnd,
                     begin,
                     end);
@@ -470,7 +495,7 @@ public abstract class RangeNodes {
         @Specialization(guards = { "rubyClass == getRangeClass()", "fitsInInteger(begin)", "fitsInInteger(end)" })
         protected RubyIntRange longFittingIntRange(RubyClass rubyClass, long begin, long end, boolean excludeEnd) {
             // Not a Range subclass, we can use the shape directly.
-            final Shape shape = RubyLanguage.intRangeShape;
+            final Shape shape = getLanguage().intRangeShape;
             final RubyIntRange range = new RubyIntRange(
                     coreLibrary().rangeClass,
                     shape,
@@ -486,7 +511,7 @@ public abstract class RangeNodes {
             // Not a Range subclass, we can use the shape directly.
             final RubyLongRange range = new RubyLongRange(
                     coreLibrary().rangeClass,
-                    RubyLanguage.longRangeShape,
+                    getLanguage().longRangeShape,
                     excludeEnd,
                     begin,
                     end);
@@ -496,14 +521,13 @@ public abstract class RangeNodes {
 
         @Specialization(guards = { "rubyClass != getRangeClass() || (!isIntOrLong(begin) || !isIntOrLong(end))" })
         protected RubyObjectRange objectRange(RubyClass rubyClass, Object begin, Object end, boolean excludeEnd,
-                @Cached AllocateHelperNode allocateHelperNode,
                 @Cached DispatchNode compare) {
 
-            if (compare.call(begin, "<=>", end) == nil && end != nil) {
+            if (compare.call(begin, "<=>", end) == nil && end != nil && begin != nil) {
                 throw new RaiseException(getContext(), coreExceptions().argumentError("bad value for range", this));
             }
 
-            final Shape shape = allocateHelperNode.getCachedShape(rubyClass);
+            final Shape shape = getLanguage().objectRangeShape;
             final RubyObjectRange range = new RubyObjectRange(rubyClass, shape, excludeEnd, begin, end);
             AllocationTracing.trace(range, this);
             return range;
@@ -519,12 +543,8 @@ public abstract class RangeNodes {
 
         @Specialization
         protected RubyObjectRange allocate(RubyClass rubyClass) {
-            final RubyObjectRange range = new RubyObjectRange(
-                    rubyClass,
-                    RubyLanguage.objectRangeShape,
-                    false,
-                    nil,
-                    nil);
+            final Shape shape = getLanguage().objectRangeShape;
+            final RubyObjectRange range = new RubyObjectRange(rubyClass, shape, false, nil, nil);
             AllocationTracing.trace(range, this);
             return range;
         }
@@ -547,7 +567,7 @@ public abstract class RangeNodes {
 
         @Specialization
         protected RubyArray normalize(RubyRange range, int size) {
-            return ArrayHelpers.createArray(getContext(), startLengthNode.execute(range, size));
+            return createArray(startLengthNode.execute(range, size));
         }
     }
 
@@ -587,6 +607,18 @@ public abstract class RangeNodes {
         protected int[] normalizeObjectRange(RubyObjectRange range, int size,
                 @Cached ToIntNode toInt) {
             return normalize(toInt.execute(range.begin), toInt.execute(range.end), range.excludedEnd, size);
+        }
+
+        @Specialization(guards = "range.isBeginless()")
+        protected int[] normalizeBeginlessRange(RubyObjectRange range, int size,
+                @Cached ToIntNode toInt) {
+            return normalize(0, toInt.execute(range.end), range.excludedEnd, size);
+        }
+
+        @Specialization(guards = "range.isBoundless()")
+        protected int[] normalizeNilNilRange(RubyObjectRange range, int size,
+                @Cached ToIntNode toInt) {
+            return new int[]{ 0, size };
         }
 
         private int[] normalize(int begin, int end, boolean excludedEnd, int size) {

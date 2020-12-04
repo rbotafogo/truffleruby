@@ -29,7 +29,7 @@ There is a handy script in the repo that does everything needed:
 
 ```bash
 ./update.sh truffleruby $VERSION
-./update.sh graalvm $VERSION
+./update.sh truffleruby-graalvm $VERSION
 ```
 
 ## ruby-build
@@ -66,6 +66,13 @@ ruby update-truffleruby.rb $VERSION ../ruby-versions/pkg
 The script must be run after running the `ruby-versions` script above.
 
 cc `@havenwood, @pkuczynski` in the PR description.
+
+## ruby/setup-ruby
+
+Trigger the builds on [ruby/ruby-builder](https://github.com/ruby/ruby-builder) and once done,
+add the version in [ruby-builder-versions.js](https://github.com/ruby/setup-ruby/blob/master/ruby-builder-versions.js),
+update the [README](https://github.com/ruby/setup-ruby/blob/master/README.md#supported-versions),
+and make a release.
 
 ## Conclusion
 

@@ -14,6 +14,7 @@ import org.truffleruby.RubyLanguage;
 import org.truffleruby.core.klass.RubyClass;
 import org.truffleruby.core.numeric.RubyBignum;
 import org.truffleruby.core.symbol.RubySymbol;
+import org.truffleruby.core.string.ImmutableRubyString;
 import org.truffleruby.language.Nil;
 import org.truffleruby.language.RubyBaseNode;
 import org.truffleruby.language.RubyDynamicObject;
@@ -29,7 +30,11 @@ public abstract class LogicalClassNode extends RubyBaseNode {
         return LogicalClassNodeGen.create();
     }
 
-    public abstract RubyClass executeLogicalClass(Object value);
+    public static LogicalClassNode getUncached() {
+        return LogicalClassNodeGen.getUncached();
+    }
+
+    public abstract RubyClass execute(Object value);
 
     @Specialization(guards = "value")
     protected RubyClass logicalClassTrue(boolean value,
@@ -78,6 +83,13 @@ public abstract class LogicalClassNode extends RubyBaseNode {
             @CachedContext(RubyLanguage.class) RubyContext context) {
         return context.getCoreLibrary().symbolClass;
     }
+
+    @Specialization
+    protected RubyClass logicalImmutableString(ImmutableRubyString value,
+            @CachedContext(RubyLanguage.class) RubyContext context) {
+        return context.getCoreLibrary().stringClass;
+    }
+
 
     @Specialization
     protected RubyClass logicalClassObject(RubyDynamicObject object) {

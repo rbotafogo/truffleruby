@@ -216,6 +216,19 @@ class Enumerator
     Enumerator::Chain.new(self, other)
   end
 
+  def self.produce(initial = nil)
+    # Taken from https://github.com/zverok/enumerator_generate
+    raise ArgumentError, 'No block given' unless block_given?
+    Enumerator.new(Float::INFINITY) do |y|
+      val = initial == nil ? yield() : initial
+
+      loop do
+        y << val
+        val = yield(val)
+      end
+    end
+  end
+
   class Yielder
     def initialize(&block)
       raise LocalJumpError, 'Expected a block to be given' unless block_given?
@@ -234,6 +247,10 @@ class Enumerator
       self.yield(*args)
 
       self
+    end
+
+    def to_proc
+      self.method(:yield).to_proc
     end
   end
 
@@ -292,6 +309,8 @@ class Enumerator
     def lazy
       self
     end
+
+    # TODO: rewind and/or to_a/force behave improperly on outputs of take, drop, uniq, possibly more
 
     alias_method :force, :to_a
 
@@ -496,8 +515,11 @@ class Enumerator
       end
     end
 
+    def chunk(&block)
+      super(&block).lazy
+    end
+
     # clone these methods from the superclass
-    alias_method :chunk, :chunk
     alias_method :chunk_while, :chunk_while
     alias_method :slice_after, :slice_after
     alias_method :slice_before, :slice_before
@@ -505,8 +527,8 @@ class Enumerator
 
     def uniq
       if block_given?
+        h = {}
         Lazy.new(self, nil) do |yielder, *args|
-          h = {}
           val = args.length >= 2 ? args : args.first
           comp = yield(val)
           unless h.key?(comp)
@@ -515,8 +537,8 @@ class Enumerator
           end
         end
       else
+        h = {}
         Lazy.new(self, nil) do |yielder, *args|
-          h = {}
           val = args.length >= 2 ? args : args.first
           unless h.key?(val)
             h[val] = true

@@ -21,6 +21,7 @@ package org.truffleruby.core.regexp;
 import java.util.Arrays;
 import java.util.Iterator;
 
+import com.oracle.truffle.api.library.CachedLibrary;
 import org.jcodings.specific.UTF8Encoding;
 import org.joni.NameEntry;
 import org.joni.Regex;
@@ -31,19 +32,19 @@ import org.truffleruby.builtins.CoreMethodArrayArgumentsNode;
 import org.truffleruby.builtins.CoreModule;
 import org.truffleruby.builtins.Primitive;
 import org.truffleruby.builtins.PrimitiveArrayArgumentsNode;
-import org.truffleruby.core.array.ArrayHelpers;
 import org.truffleruby.core.array.RubyArray;
 import org.truffleruby.core.cast.ToStrNode;
 import org.truffleruby.core.klass.RubyClass;
 import org.truffleruby.core.regexp.RegexpNodesFactory.ToSNodeFactory;
 import org.truffleruby.core.rope.CodeRange;
 import org.truffleruby.core.rope.Rope;
+import org.truffleruby.core.rope.RopeOperations;
 import org.truffleruby.core.string.RubyString;
 import org.truffleruby.core.string.StringNodes;
 import org.truffleruby.core.symbol.RubySymbol;
 import org.truffleruby.language.Visibility;
 import org.truffleruby.language.control.RaiseException;
-import org.truffleruby.language.objects.AllocateHelperNode;
+import org.truffleruby.language.library.RubyStringLibrary;
 
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -51,7 +52,6 @@ import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Fallback;
 import com.oracle.truffle.api.dsl.ImportStatic;
 import com.oracle.truffle.api.dsl.Specialization;
-import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.object.Shape;
 import org.truffleruby.language.objects.AllocationTracing;
@@ -95,28 +95,44 @@ public abstract class RegexpNodes {
 
         @Child private StringNodes.MakeStringNode makeStringNode;
         @Child private ToStrNode toStrNode;
+        @Child private QuoteNode quoteNode;
 
-        @Specialization
-        protected RubyString quoteString(RubyString raw) {
-            final Rope rope = raw.rope;
+        public abstract RubyString execute(Object raw);
+
+        public static QuoteNode create() {
+            return RegexpNodesFactory.QuoteNodeFactory.create(null);
+        }
+
+        @Specialization(guards = "libRaw.isRubyString(raw)")
+        protected RubyString quoteString(Object raw,
+                @CachedLibrary(limit = "2") RubyStringLibrary libRaw) {
+            final Rope rope = libRaw.getRope(raw);
             return getMakeStringNode().fromRope(ClassicRegexp.quote19(rope));
         }
 
         @Specialization
         protected RubyString quoteSymbol(RubySymbol raw) {
-            return quoteString(
+            return doQuoteString(
                     getMakeStringNode()
                             .executeMake(raw.getString(), UTF8Encoding.INSTANCE, CodeRange.CR_UNKNOWN));
         }
 
         @Fallback
-        protected RubyString quote(VirtualFrame frame, Object raw) {
+        protected RubyString quote(Object raw) {
             if (toStrNode == null) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
                 toStrNode = insert(ToStrNode.create());
             }
 
-            return quoteString(toStrNode.executeToStr(raw));
+            return doQuoteString(toStrNode.executeToStr(raw));
+        }
+
+        private RubyString doQuoteString(Object raw) {
+            if (quoteNode == null) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                quoteNode = insert(QuoteNode.create());
+            }
+            return quoteNode.execute(raw);
         }
 
         private StringNodes.MakeStringNode getMakeStringNode() {
@@ -196,7 +212,7 @@ public abstract class RegexpNodes {
         protected RubyArray regexpNames(RubyRegexp regexp) {
             final int size = regexp.regex.numberOfNames();
             if (size == 0) {
-                return ArrayHelpers.createEmptyArray(getContext());
+                return createEmptyArray();
             }
 
             final Object[] names = new Object[size];
@@ -205,7 +221,7 @@ public abstract class RegexpNodes {
                 final NameEntry e = iter.next();
                 final byte[] bytes = Arrays.copyOfRange(e.name, e.nameP, e.nameEnd);
 
-                final Rope rope = getLanguage().ropeCache.getRope(bytes, UTF8Encoding.INSTANCE, CodeRange.CR_UNKNOWN);
+                final Rope rope = RopeOperations.create(bytes, UTF8Encoding.INSTANCE, CodeRange.CR_UNKNOWN);
                 final RubySymbol name = getSymbol(rope);
 
                 final int[] backrefs = e.getBackRefs();
@@ -221,17 +237,10 @@ public abstract class RegexpNodes {
     @CoreMethod(names = { "__allocate__", "__layout_allocate__" }, constructor = true, visibility = Visibility.PRIVATE)
     public abstract static class AllocateNode extends CoreMethodArrayArgumentsNode {
 
-        @Child private AllocateHelperNode allocateNode = AllocateHelperNode.create();
-
         @Specialization
         protected RubyRegexp allocate(RubyClass rubyClass) {
-            RubyRegexp regexp = new RubyRegexp(
-                    rubyClass,
-                    allocateNode.getCachedShape(rubyClass),
-                    null,
-                    null,
-                    RegexpOptions.NULL_OPTIONS,
-                    null);
+            final Shape shape = getLanguage().regexpShape;
+            final RubyRegexp regexp = new RubyRegexp(rubyClass, shape, null, null, RegexpOptions.NULL_OPTIONS, null);
             AllocationTracing.trace(regexp, this);
             return regexp;
         }
@@ -252,19 +261,22 @@ public abstract class RegexpNodes {
     @ImportStatic(RegexpGuards.class)
     public static abstract class RegexpCompileNode extends CoreMethodArrayArgumentsNode {
 
-        @Specialization(guards = { "isRegexpLiteral(regexp)" })
-        protected RubyRegexp initializeRegexpLiteral(RubyRegexp regexp, RubyString pattern, int options) {
+        @Specialization(guards = "isRegexpLiteral(regexp)")
+        protected RubyRegexp initializeRegexpLiteral(RubyRegexp regexp, Object pattern, int options) {
             throw new RaiseException(getContext(), coreExceptions().securityError("can't modify literal regexp", this));
         }
 
-        @Specialization(guards = { "!isRegexpLiteral(regexp)", "isInitialized(regexp)" })
-        protected RubyRegexp initializeAlreadyInitialized(RubyRegexp regexp, RubyString pattern, int options) {
+        @Specialization(
+                guards = { "!isRegexpLiteral(regexp)", "isInitialized(regexp)" })
+        protected RubyRegexp initializeAlreadyInitialized(RubyRegexp regexp, Object pattern, int options) {
             throw new RaiseException(getContext(), coreExceptions().typeError("already initialized regexp", this));
         }
 
-        @Specialization(guards = { "!isRegexpLiteral(regexp)", "!isInitialized(regexp)" })
-        protected RubyRegexp initialize(RubyRegexp regexp, RubyString pattern, int options) {
-            RegexpNodes.initialize(getContext(), regexp, pattern.rope, options, this);
+        @Specialization(
+                guards = { "libPattern.isRubyString(pattern)", "!isRegexpLiteral(regexp)", "!isInitialized(regexp)" })
+        protected RubyRegexp initialize(RubyRegexp regexp, Object pattern, int options,
+                @CachedLibrary(limit = "2") RubyStringLibrary libPattern) {
+            RegexpNodes.initialize(getContext(), regexp, libPattern.getRope(pattern), options, this);
             return regexp;
         }
     }

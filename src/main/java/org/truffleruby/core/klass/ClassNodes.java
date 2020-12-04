@@ -15,6 +15,9 @@ import org.truffleruby.builtins.CoreMethod;
 import org.truffleruby.builtins.CoreMethodArrayArgumentsNode;
 import org.truffleruby.builtins.CoreModule;
 import org.truffleruby.core.CoreLibrary;
+import org.truffleruby.core.basicobject.BasicObjectNodes;
+import org.truffleruby.core.inlined.InlinedDispatchNode;
+import org.truffleruby.core.inlined.InlinedMethodNode;
 import org.truffleruby.core.module.RubyModule;
 import org.truffleruby.core.proc.RubyProc;
 import org.truffleruby.core.string.StringUtils;
@@ -24,6 +27,8 @@ import org.truffleruby.language.RubyDynamicObject;
 import org.truffleruby.language.Visibility;
 import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.dispatch.DispatchNode;
+import org.truffleruby.language.dispatch.DispatchingNode;
+import org.truffleruby.language.methods.InternalMethod;
 import org.truffleruby.language.objects.InitializeClassNode;
 import org.truffleruby.language.objects.InitializeClassNodeGen;
 import org.truffleruby.language.objects.shared.SharedObjects;
@@ -35,7 +40,6 @@ import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.profiles.BranchProfile;
 import com.oracle.truffle.api.source.SourceSection;
-
 
 @CoreModule(value = "Class", isClass = true)
 public abstract class ClassNodes {
@@ -236,7 +240,7 @@ public abstract class ClassNodes {
                 true,
                 rubyClass,
                 null);
-        SharedObjects.propagate(context, rubyClass, metaClass);
+        SharedObjects.propagate(context.getLanguageSlow(), rubyClass, metaClass);
         rubyClass.setMetaClass(metaClass);
 
         return rubyClass.getMetaClass();
@@ -266,32 +270,82 @@ public abstract class ClassNodes {
 
         @Child private DispatchNode allocateNode = DispatchNode.create();
 
-        @Specialization
-        protected Object newInstance(VirtualFrame frame, RubyClass rubyClass) {
+        @Specialization(guards = "!rubyClass.isSingleton")
+        protected Object newInstance(RubyClass rubyClass) {
             return allocateNode.call(rubyClass, "__allocate__");
+        }
+
+        @Specialization(guards = "rubyClass.isSingleton")
+        protected RubyClass newSingletonInstance(RubyClass rubyClass) {
+            throw new RaiseException(
+                    getContext(),
+                    getContext().getCoreExceptions().typeErrorCantCreateInstanceOfSingletonClass(this));
         }
     }
 
     @CoreMethod(names = "new", needsBlock = true, rest = true)
-    public abstract static class NewNode extends CoreMethodArrayArgumentsNode {
+    public abstract static class NewNode extends InlinedMethodNode {
 
-        @Child private DispatchNode allocateNode = DispatchNode.create();
-        @Child private DispatchNode initialize = DispatchNode.create();
+        public static NewNode create() {
+            return ClassNodesFactory.NewNodeFactory.create(null);
+        }
 
-        @Specialization
+        @Child private DispatchingNode allocateNode;
+        @Child private DispatchingNode initialize;
+
+        public abstract Object execute(VirtualFrame frame, Object rubyClass, Object[] args, Object block);
+
+        @Specialization(guards = "!rubyClass.isSingleton")
         protected Object newInstance(VirtualFrame frame, RubyClass rubyClass, Object[] args, NotProvided block) {
             return doNewInstance(frame, rubyClass, args, null);
         }
 
-        @Specialization
+        @Specialization(guards = "!rubyClass.isSingleton")
         protected Object newInstance(VirtualFrame frame, RubyClass rubyClass, Object[] args, RubyProc block) {
             return doNewInstance(frame, rubyClass, args, block);
         }
 
+        @Specialization(guards = "rubyClass.isSingleton")
+        protected RubyClass newSingletonInstance(RubyClass rubyClass, Object[] args, Object maybeBlock) {
+            throw new RaiseException(
+                    getContext(),
+                    getContext().getCoreExceptions().typeErrorCantCreateInstanceOfSingletonClass(this));
+        }
+
+        @Override
+        public Object inlineExecute(VirtualFrame frame, Object self, Object[] args, Object proc) {
+            return execute(frame, self, args, proc);
+        }
+
         private Object doNewInstance(VirtualFrame frame, RubyClass rubyClass, Object[] args, RubyProc block) {
-            final Object instance = allocateNode.call(rubyClass, "__allocate__");
-            initialize.callWithBlock(instance, "initialize", block, args);
+            final Object instance = allocateNode().call(rubyClass, "__allocate__");
+            initialize().callWithBlock(instance, "initialize", block, args);
             return instance;
+        }
+
+        private DispatchingNode allocateNode() {
+            if (allocateNode == null) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                allocateNode = insert(new InlinedDispatchNode(
+                        getLanguage(),
+                        BasicObjectNodes.AllocateNode.create()));
+            }
+            return allocateNode;
+        }
+
+        private DispatchingNode initialize() {
+            if (initialize == null) {
+                CompilerDirectives.transferToInterpreterAndInvalidate();
+                initialize = insert(new InlinedDispatchNode(
+                        getLanguage(),
+                        BasicObjectNodes.InitializeNode.create()));
+            }
+            return initialize;
+        }
+
+        @Override
+        public InternalMethod getMethod() {
+            return getContext().getCoreMethods().CLASS_NEW;
         }
     }
 
@@ -368,6 +422,5 @@ public abstract class ClassNodes {
                     getEncapsulatingSourceSection(),
                     classClass);
         }
-
     }
 }

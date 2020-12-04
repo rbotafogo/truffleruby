@@ -175,8 +175,10 @@ class Exception
   end
 
   def self.to_tty?
-    # Whether $stderr refers to the original STDERR and STDERR is a tty
-    $stderr.equal?(STDERR) && !STDERR.closed? && STDERR.tty?
+    # Whether $stderr refers to the original STDERR and STDERR is a tty.
+    # When using polyglot stdio, we cannot know and assume false.
+    $stderr.equal?(STDERR) && !STDERR.closed? &&
+      (!Truffle::Boot.get_option('polyglot-stdio') && STDERR.tty?)
   end
 end
 
@@ -210,6 +212,13 @@ class UncaughtThrowError < ArgumentError
 
   def to_s
     sprintf(Primitive.exception_message(self), @tag)
+  end
+end
+
+class FrozenError < RuntimeError
+  def initialize(*args, receiver: undefined)
+    super(*args)
+    Primitive.frozen_error_set_receiver self, receiver unless Primitive.undefined?(receiver)
   end
 end
 
@@ -297,13 +306,11 @@ class LocalJumpError < StandardError
 end
 
 class SyntaxError < ScriptError
-  attr_accessor :column
-  attr_accessor :line
-  attr_accessor :file
-  attr_accessor :code
-
-  def reason
-    @reason_message
+  def initialize(*args)
+    if args.empty?
+      args << 'compile error'
+    end
+    super(*args)
   end
 end
 
@@ -312,24 +319,40 @@ class SystemExit < Exception
   ##
   # Process exit status if this exception is raised
 
-  attr_reader :status
-
   ##
   # Creates a SystemExit exception with optional status and message.  If the
   # status is omitted, Process::EXIT_SUCCESS is used.
   #--
   # *args is used to simulate optional prepended argument like MRI
 
-  def initialize(first=nil, *args)
-    if first.kind_of?(Integer)
-      status = first
-      super(*args)
-    else
-      status = Process::EXIT_SUCCESS
-      super
-    end
+  def initialize(*args)
+    status = if args.empty?
+               Process::EXIT_SUCCESS
+             else
+               case args[0]
+               when true
+                 args.shift
+                 Process::EXIT_SUCCESS
+               when false
+                 args.shift
+                 Process::EXIT_FAILURE
+               else
+                 converted = Truffle::Type.rb_check_to_integer(args[0], :to_int)
+                 if Primitive.nil?(converted)
+                   Process::EXIT_SUCCESS
+                 else
+                   args.shift
+                   if converted == 0
+                     Process::EXIT_SUCCESS
+                   else
+                     converted
+                   end
+                 end
+               end
+             end
+    super(*args)
 
-    @status = status
+    Primitive.system_exit_set_status(self, status)
   end
 
   ##

@@ -2,12 +2,12 @@
 
 // Global variables, rb_gvar_*, rb_gv_*
 
-VALUE rb_gvar_var_getter(ID id, void *data, struct rb_global_variable *gvar) {
-  return *(VALUE*)data;
+VALUE rb_gvar_var_getter(ID id, VALUE *data) {
+  return *data;
 }
 
-void rb_gvar_var_setter(VALUE val, ID id, void *data, struct rb_global_variable *gvar) {
-  *((VALUE*)data) = val;
+void rb_gvar_var_setter(VALUE val, ID id, VALUE *data) {
+  *data = val;
 }
 
 void rb_define_hooked_variable(const char *name, VALUE *var, VALUE (*getter)(ANYARGS), void (*setter)(ANYARGS)) {
@@ -22,7 +22,7 @@ void rb_define_hooked_variable(const char *name, VALUE *var, VALUE (*getter)(ANY
   polyglot_invoke(RUBY_CEXT, "rb_define_hooked_variable", rb_tr_unwrap(rb_str_new_cstr(name)), var, getter, setter);
 }
 
-void rb_gvar_readonly_setter(VALUE val, ID id, void *data, struct rb_global_variable *gvar) {
+void rb_gvar_readonly_setter(VALUE val, ID id, VALUE *data) {
   rb_raise(rb_eNameError, "read-only variable");
 }
 
@@ -69,13 +69,11 @@ void rb_set_safe_level(int level) {
 }
 
 void rb_check_safe_obj(VALUE object) {
-  if (rb_safe_level() > 0 && OBJ_TAINTED(object)) {
-    rb_insecure_operation();
-  }
+  rb_warn("rb_check_safe_obj will be removed in Ruby 3.0");
 }
 
 void rb_check_trusted(VALUE obj) {
-  // This function intentionally does nothing to match MRI.
+  rb_warning("rb_check_trusted is deprecated and will be removed in Ruby 3.2.");
 }
 
 // $VERBOSE

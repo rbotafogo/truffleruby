@@ -60,6 +60,7 @@ import org.jcodings.Encoding;
 import org.jcodings.specific.ASCIIEncoding;
 import org.jcodings.specific.UTF8Encoding;
 import org.truffleruby.RubyContext;
+import org.truffleruby.RubyLanguage;
 import org.truffleruby.core.exception.ErrnoErrorNode;
 import org.truffleruby.core.rope.Rope;
 import org.truffleruby.core.rope.RopeBuilder;
@@ -71,6 +72,7 @@ import org.truffleruby.language.control.RaiseException;
 
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.nodes.Node;
+import org.truffleruby.language.library.RubyStringLibrary;
 
 public abstract class RubyDateFormatter {
     private static final DateFormatSymbols FORMAT_SYMBOLS = new DateFormatSymbols(Locale.US);
@@ -349,7 +351,7 @@ public abstract class RubyDateFormatter {
 
     @TruffleBoundary
     public static RopeBuilder formatToRopeBuilder(List<Token> compiledPattern, ZonedDateTime dt, Object zone,
-            RubyContext context, Node currentNode, ErrnoErrorNode errnoErrorNode) {
+            RubyContext context, RubyLanguage language, Node currentNode, ErrnoErrorNode errnoErrorNode) {
         RubyTimeOutputFormatter formatter = RubyTimeOutputFormatter.DEFAULT_FORMATTER;
         RopeBuilder toAppendTo = new RopeBuilder();
 
@@ -527,7 +529,7 @@ public abstract class RubyDateFormatter {
             } catch (IndexOutOfBoundsException ioobe) {
                 final Backtrace backtrace = context.getCallStack().getBacktrace(currentNode);
                 final Rope messageRope = StringOperations.encodeRope("strftime", UTF8Encoding.INSTANCE);
-                final RubyString message = StringOperations.createString(context, messageRope);
+                final RubyString message = StringOperations.createString(context, language, messageRope);
                 throw new RaiseException(
                         context,
                         errnoErrorNode.execute(context.getCoreLibrary().getErrnoValue("ERANGE"), message, backtrace));
@@ -618,8 +620,9 @@ public abstract class RubyDateFormatter {
     }
 
     private static String getRubyTimeZoneName(ZonedDateTime dt, Object zone) {
-        if (zone instanceof RubyString) {
-            return ((RubyString) zone).getJavaString();
+        RubyStringLibrary strings = RubyStringLibrary.getUncached();
+        if (strings.isRubyString(zone)) {
+            return strings.getJavaString(zone);
         } else {
             return "";
         }

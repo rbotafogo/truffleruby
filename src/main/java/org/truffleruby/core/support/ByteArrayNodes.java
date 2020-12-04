@@ -9,8 +9,8 @@
  */
 package org.truffleruby.core.support;
 
+import com.oracle.truffle.api.library.CachedLibrary;
 import com.oracle.truffle.api.object.Shape;
-import org.truffleruby.RubyLanguage;
 import org.truffleruby.builtins.CoreMethod;
 import org.truffleruby.builtins.CoreMethodArrayArgumentsNode;
 import org.truffleruby.builtins.CoreModule;
@@ -32,7 +32,7 @@ import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.profiles.BranchProfile;
 import com.oracle.truffle.api.profiles.ConditionProfile;
-import org.truffleruby.language.objects.AllocateHelperNode;
+import org.truffleruby.language.library.RubyStringLibrary;
 import org.truffleruby.language.objects.AllocationTracing;
 
 @CoreModule(value = "Truffle::ByteArray", isClass = true)
@@ -41,16 +41,13 @@ public abstract class ByteArrayNodes {
     @CoreMethod(names = { "__allocate__", "__layout_allocate__" }, constructor = true, visibility = Visibility.PRIVATE)
     public abstract static class AllocateNode extends UnaryCoreMethodNode {
 
-        @Child private AllocateHelperNode allocateNode = AllocateHelperNode.create();
-
         @Specialization
         protected RubyByteArray allocate(RubyClass rubyClass) {
-            final Shape shape = allocateNode.getCachedShape(rubyClass);
+            final Shape shape = getLanguage().byteArrayShape;
             final RubyByteArray instance = new RubyByteArray(rubyClass, shape, RopeConstants.EMPTY_BYTES);
             AllocationTracing.trace(instance, this);
             return instance;
         }
-
     }
 
     @CoreMethod(names = "initialize", required = 1, lowerFixnum = 1)
@@ -78,12 +75,13 @@ public abstract class ByteArrayNodes {
     @CoreMethod(names = "prepend", required = 1)
     public abstract static class PrependNode extends CoreMethodArrayArgumentsNode {
 
-        @Specialization
-        protected RubyByteArray prepend(RubyByteArray byteArray, RubyString string,
+        @Specialization(guards = "strings.isRubyString(string)")
+        protected RubyByteArray prepend(RubyByteArray byteArray, Object string,
+                @CachedLibrary(limit = "2") RubyStringLibrary strings,
                 @Cached RopeNodes.BytesNode bytesNode) {
             final byte[] bytes = byteArray.bytes;
 
-            final Rope rope = string.rope;
+            final Rope rope = strings.getRope(string);
             final int prependLength = rope.byteLength();
             final int originalLength = bytes.length;
             final int newLength = prependLength + originalLength;
@@ -92,7 +90,7 @@ public abstract class ByteArrayNodes {
             System.arraycopy(bytes, 0, prependedBytes, prependLength, originalLength);
             final RubyByteArray instance = new RubyByteArray(
                     coreLibrary().byteArrayClass,
-                    RubyLanguage.byteArrayShape,
+                    getLanguage().byteArrayShape,
                     prependedBytes);
             AllocationTracing.trace(instance, this);
             return instance;
@@ -160,14 +158,16 @@ public abstract class ByteArrayNodes {
     @CoreMethod(names = "locate", required = 3, lowerFixnum = { 2, 3 })
     public abstract static class LocateNode extends CoreMethodArrayArgumentsNode {
 
-        @Specialization(guards = { "isSingleBytePattern(pattern)" })
-        protected Object getByteSingleByte(RubyByteArray byteArray, RubyString pattern, int start, int length,
+        @Specialization(
+                guards = { "isSingleBytePattern(libPattern.getRope(pattern))" })
+        protected Object getByteSingleByte(RubyByteArray byteArray, Object pattern, int start, int length,
                 @Cached RopeNodes.BytesNode bytesNode,
                 @Cached BranchProfile tooSmallStartProfile,
-                @Cached BranchProfile tooLargeStartProfile) {
+                @Cached BranchProfile tooLargeStartProfile,
+                @CachedLibrary(limit = "2") RubyStringLibrary libPattern) {
 
             final byte[] bytes = byteArray.bytes;
-            final Rope rope = pattern.rope;
+            final Rope rope = libPattern.getRope(pattern);
             final byte searchByte = bytesNode.execute(rope)[0];
 
             if (start >= length) {
@@ -185,12 +185,14 @@ public abstract class ByteArrayNodes {
             return index == -1 ? nil : index + 1;
         }
 
-        @Specialization(guards = { "!isSingleBytePattern(pattern)" })
-        protected Object getByte(RubyByteArray byteArray, RubyString pattern, int start, int length,
+        @Specialization(
+                guards = { "!isSingleBytePattern(libPattern.getRope(pattern))" })
+        protected Object getByte(RubyByteArray byteArray, Object pattern, int start, int length,
                 @Cached RopeNodes.BytesNode bytesNode,
                 @Cached RopeNodes.CharacterLengthNode characterLengthNode,
-                @Cached ConditionProfile notFoundProfile) {
-            final Rope patternRope = pattern.rope;
+                @Cached ConditionProfile notFoundProfile,
+                @CachedLibrary(limit = "2") RubyStringLibrary libPattern) {
+            final Rope patternRope = libPattern.getRope(pattern);
             final int index = indexOf(
                     byteArray.bytes,
                     start,
@@ -204,8 +206,7 @@ public abstract class ByteArrayNodes {
             }
         }
 
-        protected boolean isSingleBytePattern(RubyString pattern) {
-            final Rope rope = pattern.rope;
+        protected boolean isSingleBytePattern(Rope rope) {
             return RopeGuards.isSingleByteString(rope);
         }
 

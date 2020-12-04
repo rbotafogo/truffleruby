@@ -9,6 +9,7 @@
  */
 package org.truffleruby.core.exception;
 
+import com.oracle.truffle.api.object.Shape;
 import org.truffleruby.SuppressFBWarnings;
 import org.truffleruby.builtins.CoreMethod;
 import org.truffleruby.builtins.CoreMethodArrayArgumentsNode;
@@ -19,19 +20,16 @@ import org.truffleruby.builtins.PrimitiveNode;
 import org.truffleruby.core.array.RubyArray;
 import org.truffleruby.core.klass.RubyClass;
 import org.truffleruby.core.proc.RubyProc;
-import org.truffleruby.core.string.RubyString;
 import org.truffleruby.language.NotProvided;
 import org.truffleruby.language.Visibility;
 import org.truffleruby.language.backtrace.Backtrace;
 import org.truffleruby.language.backtrace.BacktraceFormatter;
 import org.truffleruby.language.methods.LookupMethodOnSelfNode;
-import org.truffleruby.language.objects.AllocateHelperNode;
 
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.VirtualFrame;
-import com.oracle.truffle.api.object.Shape;
 import com.oracle.truffle.api.profiles.ConditionProfile;
 import org.truffleruby.language.objects.AllocationTracing;
 
@@ -41,16 +39,13 @@ public abstract class ExceptionNodes {
     @CoreMethod(names = { "__allocate__", "__layout_allocate__" }, constructor = true, visibility = Visibility.PRIVATE)
     public abstract static class AllocateNode extends CoreMethodArrayArgumentsNode {
 
-        @Child private AllocateHelperNode allocateNode = AllocateHelperNode.create();
-
         @Specialization
         protected RubyException allocateException(RubyClass rubyClass) {
-            final Shape shape = allocateNode.getCachedShape(rubyClass);
+            final Shape shape = getLanguage().exceptionShape;
             final RubyException instance = new RubyException(rubyClass, shape, nil, null, nil);
             AllocationTracing.trace(instance, this);
             return instance;
         }
-
     }
 
     @CoreMethod(names = "initialize", optional = 1)
@@ -128,7 +123,7 @@ public abstract class ExceptionNodes {
         private void initializeExceptionCopy(RubyException self, RubyException from) {
             Backtrace backtrace = from.backtrace;
             if (backtrace != null) {
-                self.backtrace = backtrace.copy(getContext(), self);
+                self.backtrace = backtrace.copy(self);
             } else {
                 self.backtrace = null;
             }
@@ -181,7 +176,7 @@ public abstract class ExceptionNodes {
                 if (hasLocationsProfile.profile(backtraceLocations == null)) {
                     Backtrace backtrace = exception.backtrace;
                     backtraceLocations = backtrace
-                            .getBacktraceLocations(getContext(), GetBacktraceException.UNLIMITED, null);
+                            .getBacktraceLocations(getContext(), getLanguage(), GetBacktraceException.UNLIMITED, null);
                     exception.backtraceLocations = backtraceLocations;
                 }
                 return backtraceLocations;
@@ -306,7 +301,7 @@ public abstract class ExceptionNodes {
         @Child ErrnoErrorNode errnoErrorNode = ErrnoErrorNode.create();
 
         @Specialization
-        protected RubySystemCallError exceptionErrnoError(RubyString message, int errno) {
+        protected RubySystemCallError exceptionErrnoError(Object message, int errno) {
             return errnoErrorNode.execute(errno, message, null);
         }
 
@@ -321,7 +316,7 @@ public abstract class ExceptionNodes {
         @Specialization
         protected boolean breakpoint() {
             // have a Ruby backtrace at hand
-            String printableRubyBacktrace = BacktraceFormatter.printableRubyBacktrace(getContext(), this);
+            String printableRubyBacktrace = BacktraceFormatter.printableRubyBacktrace(this);
             return true; // place to put a Java breakpoint
         }
 

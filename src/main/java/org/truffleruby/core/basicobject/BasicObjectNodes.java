@@ -10,6 +10,7 @@
 package org.truffleruby.core.basicobject;
 
 import com.oracle.truffle.api.dsl.CachedLanguage;
+import com.oracle.truffle.api.object.Shape;
 import org.truffleruby.Layouts;
 import org.truffleruby.RubyContext;
 import org.truffleruby.RubyLanguage;
@@ -17,19 +18,22 @@ import org.truffleruby.builtins.CoreMethod;
 import org.truffleruby.builtins.CoreMethodArrayArgumentsNode;
 import org.truffleruby.builtins.CoreModule;
 import org.truffleruby.builtins.UnaryCoreMethodNode;
+import org.truffleruby.core.basicobject.BasicObjectNodesFactory.AllocateNodeFactory;
+import org.truffleruby.core.basicobject.BasicObjectNodesFactory.InitializeNodeFactory;
 import org.truffleruby.core.basicobject.BasicObjectNodesFactory.InstanceExecNodeFactory;
 import org.truffleruby.core.basicobject.BasicObjectNodesFactory.ReferenceEqualNodeFactory;
 import org.truffleruby.core.cast.BooleanCastNode;
 import org.truffleruby.core.cast.NameToJavaStringNode;
 import org.truffleruby.core.exception.ExceptionOperations;
 import org.truffleruby.core.exception.RubyException;
+import org.truffleruby.core.inlined.InlinedMethodNode;
 import org.truffleruby.core.klass.RubyClass;
 import org.truffleruby.core.module.ModuleOperations;
 import org.truffleruby.core.numeric.RubyBignum;
 import org.truffleruby.core.objectspace.ObjectSpaceManager;
 import org.truffleruby.core.proc.RubyProc;
+import org.truffleruby.core.rope.Rope;
 import org.truffleruby.core.rope.RopeOperations;
-import org.truffleruby.core.string.RubyString;
 import org.truffleruby.core.symbol.RubySymbol;
 import org.truffleruby.language.ImmutableRubyObject;
 import org.truffleruby.language.Nil;
@@ -46,14 +50,15 @@ import org.truffleruby.language.dispatch.DispatchConfiguration;
 import org.truffleruby.language.dispatch.DispatchNode;
 import org.truffleruby.language.dispatch.RubyCallNode;
 import org.truffleruby.language.eval.CreateEvalSourceNode;
+import org.truffleruby.language.library.RubyStringLibrary;
 import org.truffleruby.language.loader.CodeLoader;
 import org.truffleruby.language.methods.DeclarationContext;
 import org.truffleruby.language.methods.DeclarationContext.SingletonClassOfSelfDefaultDefinee;
 import org.truffleruby.language.methods.InternalMethod;
 import org.truffleruby.language.methods.LookupMethodNode;
 import org.truffleruby.language.methods.UnsupportedOperationBehavior;
-import org.truffleruby.language.objects.AllocateHelperNode;
 import org.truffleruby.language.objects.AllocationTracing;
+import org.truffleruby.language.objects.MetaClassNode;
 import org.truffleruby.language.objects.ObjectIDOperations;
 import org.truffleruby.language.supercall.SuperCallNode;
 import org.truffleruby.language.yield.CallBlockNode;
@@ -77,9 +82,7 @@ import com.oracle.truffle.api.nodes.IndirectCallNode;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.nodes.NodeUtil;
 import com.oracle.truffle.api.object.DynamicObjectLibrary;
-import com.oracle.truffle.api.object.Shape;
 import com.oracle.truffle.api.profiles.ConditionProfile;
-
 
 @CoreModule(value = "BasicObject", isClass = true)
 public abstract class BasicObjectNodes {
@@ -316,13 +319,28 @@ public abstract class BasicObjectNodes {
     }
 
     @CoreMethod(names = "initialize", needsSelf = false)
-    public abstract static class InitializeNode extends CoreMethodArrayArgumentsNode {
+    public abstract static class InitializeNode extends InlinedMethodNode {
+
+        public static InitializeNode create() {
+            return InitializeNodeFactory.create(null);
+        }
+
+        public abstract Object execute();
 
         @Specialization
         protected Object initialize() {
             return nil;
         }
 
+        @Override
+        public InternalMethod getMethod() {
+            return getContext().getCoreMethods().BASIC_OBJECT_INITIALIZE;
+        }
+
+        @Override
+        public Object inlineExecute(VirtualFrame frame, Object self, Object[] args, Object proc) {
+            return execute();
+        }
     }
 
     @CoreMethod(
@@ -335,44 +353,16 @@ public abstract class BasicObjectNodes {
 
         @Child private CreateEvalSourceNode createEvalSourceNode = new CreateEvalSourceNode();
 
-        @Specialization
+        @Specialization(guards = { "strings.isRubyString(string)", "stringsFileName.isRubyString(fileName)" })
         protected Object instanceEval(
                 VirtualFrame frame,
                 Object receiver,
-                RubyString string,
-                RubyString fileName,
+                Object string,
+                Object fileName,
                 int line,
                 NotProvided block,
-                @Cached ReadCallerFrameNode callerFrameNode,
-                @Cached IndirectCallNode callNode) {
-            final MaterializedFrame callerFrame = callerFrameNode.execute(frame);
-
-            return instanceEvalHelper(callerFrame, receiver, string, fileName, line, callNode);
-        }
-
-        @Specialization
-        protected Object instanceEval(
-                VirtualFrame frame,
-                Object receiver,
-                RubyString string,
-                RubyString fileName,
-                NotProvided line,
-                NotProvided block,
-                @Cached ReadCallerFrameNode callerFrameNode,
-                @Cached IndirectCallNode callNode) {
-            final MaterializedFrame callerFrame = callerFrameNode.execute(frame);
-
-            return instanceEvalHelper(callerFrame, receiver, string, fileName, 1, callNode);
-        }
-
-        @Specialization
-        protected Object instanceEval(
-                VirtualFrame frame,
-                Object receiver,
-                RubyString string,
-                NotProvided fileName,
-                NotProvided line,
-                NotProvided block,
+                @CachedLibrary(limit = "2") RubyStringLibrary strings,
+                @CachedLibrary(limit = "2") RubyStringLibrary stringsFileName,
                 @Cached ReadCallerFrameNode callerFrameNode,
                 @Cached IndirectCallNode callNode) {
             final MaterializedFrame callerFrame = callerFrameNode.execute(frame);
@@ -380,8 +370,53 @@ public abstract class BasicObjectNodes {
             return instanceEvalHelper(
                     callerFrame,
                     receiver,
-                    string,
-                    coreStrings().EVAL_FILENAME_STRING.createInstance(getContext()),
+                    strings.getRope(string),
+                    stringsFileName.getRope(fileName),
+                    line,
+                    callNode);
+        }
+
+        @Specialization(guards = { "strings.isRubyString(string)", "stringsFileName.isRubyString(fileName)" })
+        protected Object instanceEval(
+                VirtualFrame frame,
+                Object receiver,
+                Object string,
+                Object fileName,
+                NotProvided line,
+                NotProvided block,
+                @CachedLibrary(limit = "2") RubyStringLibrary strings,
+                @CachedLibrary(limit = "2") RubyStringLibrary stringsFileName,
+                @Cached ReadCallerFrameNode callerFrameNode,
+                @Cached IndirectCallNode callNode) {
+            final MaterializedFrame callerFrame = callerFrameNode.execute(frame);
+
+            return instanceEvalHelper(
+                    callerFrame,
+                    receiver,
+                    strings.getRope(string),
+                    stringsFileName.getRope(fileName),
+                    1,
+                    callNode);
+        }
+
+        @Specialization(guards = "strings.isRubyString(string)")
+        protected Object instanceEval(
+                VirtualFrame frame,
+                Object receiver,
+                Object string,
+                NotProvided fileName,
+                NotProvided line,
+                NotProvided block,
+                @CachedLibrary(limit = "2") RubyStringLibrary strings,
+                @Cached ReadCallerFrameNode callerFrameNode,
+                @Cached IndirectCallNode callNode) {
+            final MaterializedFrame callerFrame = callerFrameNode.execute(frame);
+
+            return instanceEvalHelper(
+                    callerFrame,
+                    receiver,
+                    strings.getRope(string),
+                    coreStrings().EVAL_FILENAME_STRING.createInstance(getContext()).rope,
                     1,
                     callNode);
         }
@@ -398,12 +433,12 @@ public abstract class BasicObjectNodes {
         }
 
         @TruffleBoundary
-        private Object instanceEvalHelper(MaterializedFrame callerFrame, Object receiver, RubyString string,
-                RubyString fileName, int line, IndirectCallNode callNode) {
-            final String fileNameString = RopeOperations.decodeRope(fileName.rope);
+        private Object instanceEvalHelper(MaterializedFrame callerFrame, Object receiver, Rope stringRope,
+                Rope fileNameRope, int line, IndirectCallNode callNode) {
+            final String fileNameString = RopeOperations.decodeRope(fileNameRope);
 
             final RubySource source = createEvalSourceNode
-                    .createEvalSource(string.rope, "instance_eval", fileNameString, line);
+                    .createEvalSource(stringRope, "instance_eval", fileNameString, line);
 
             final RubyRootNode rootNode = getContext().getCodeLoader().parse(
                     source,
@@ -568,7 +603,7 @@ public abstract class BasicObjectNodes {
                 FrameAndCallNode callerFrame) {
             final DeclarationContext declarationContext = RubyArguments.tryGetDeclarationContext(callerFrame.frame);
             final InternalMethod method = ModuleOperations
-                    .lookupMethodUncached(coreLibrary().getMetaClass(self), name, declarationContext);
+                    .lookupMethodUncached(MetaClassNode.getUncached().execute(self), name, declarationContext);
             if (method != null && !method.isUndefined()) {
                 assert method.getVisibility() == Visibility.PRIVATE || method.getVisibility() == Visibility.PROTECTED;
                 return method.getVisibility();
@@ -609,17 +644,36 @@ public abstract class BasicObjectNodes {
     // chain. We use a normal Ruby method, different that Class#allocate as Class#allocate
     // must be able to instantiate any Ruby object and should not be overridden.
     @CoreMethod(names = { "__allocate__", "__layout_allocate__" }, constructor = true, visibility = Visibility.PRIVATE)
-    public abstract static class AllocateNode extends CoreMethodArrayArgumentsNode {
+    public abstract static class AllocateNode extends InlinedMethodNode {
 
-        @Specialization
-        protected RubyBasicObject allocate(RubyClass rubyClass,
-                @Cached AllocateHelperNode allocateHelperNode) {
-            final Shape shape = allocateHelperNode.getCachedShape(rubyClass);
-            final RubyBasicObject instance = new RubyBasicObject(rubyClass, shape);
+        public static AllocateNode create() {
+            return AllocateNodeFactory.create(null);
+        }
+
+        public abstract Object execute(VirtualFrame frame, Object rubyClass);
+
+        @Specialization(guards = "!rubyClass.isSingleton")
+        protected RubyBasicObject allocate(RubyClass rubyClass) {
+            final RubyBasicObject instance = new RubyBasicObject(rubyClass, getLanguage().basicObjectShape);
             AllocationTracing.trace(instance, this);
             return instance;
         }
 
-    }
+        @Specialization(guards = "rubyClass.isSingleton")
+        protected Shape allocateSingleton(RubyClass rubyClass) {
+            throw new RaiseException(
+                    getContext(),
+                    getContext().getCoreExceptions().typeErrorCantCreateInstanceOfSingletonClass(this));
+        }
 
+        @Override
+        public Object inlineExecute(VirtualFrame frame, Object self, Object[] args, Object proc) {
+            return execute(frame, proc);
+        }
+
+        @Override
+        public InternalMethod getMethod() {
+            return getContext().getCoreMethods().BASIC_OBJECT_ALLOCATE;
+        }
+    }
 }

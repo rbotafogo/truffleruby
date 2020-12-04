@@ -103,6 +103,10 @@ class Hash
   end
   private_class_method :_constructor_fallback
 
+  def self.ruby2_keywords_hash(hash)
+    Primitive.hash_mark_ruby2_keywords(hash.dup)
+  end
+
   alias_method :store, :[]=
 
   # Used internally to get around subclasses redefining #[]=
@@ -415,9 +419,7 @@ class Hash
       end
     end
 
-    ret = "{#{out.join ', '}}"
-    Primitive.infect(ret, self) unless empty?
-    ret
+    "{#{out.join ', '}}"
   end
   alias_method :to_s, :inspect
 
@@ -439,7 +441,6 @@ class Hash
   def reject(&block)
     return to_enum(:reject) { size } unless block_given?
     copy = dup
-    copy.untaint # not tainted as it is a new Hash
     copy.delete_if(&block)
     copy
   end
@@ -469,7 +470,6 @@ class Hash
       ary << [key, value]
     end
 
-    Primitive.infect ary, self
     ary
   end
 

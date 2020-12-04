@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import com.oracle.truffle.api.library.CachedLibrary;
 import org.graalvm.options.OptionDescriptor;
 import org.jcodings.specific.UTF8Encoding;
 import org.truffleruby.RubyContext;
@@ -30,6 +31,7 @@ import org.truffleruby.core.symbol.RubySymbol;
 import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.dispatch.DispatchNode;
 import org.truffleruby.language.exceptions.TopLevelRaiseHandler;
+import org.truffleruby.language.library.RubyStringLibrary;
 import org.truffleruby.language.loader.CodeLoader;
 import org.truffleruby.language.loader.MainLoader;
 import org.truffleruby.language.methods.DeclarationContext;
@@ -49,7 +51,6 @@ import com.oracle.truffle.api.nodes.LanguageInfo;
 import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.source.Source;
 import com.oracle.truffle.llvm.api.Toolchain;
-
 
 @CoreModule("Truffle::Boot")
 public abstract class TruffleBootNodes {
@@ -109,16 +110,18 @@ public abstract class TruffleBootNodes {
         @Child MakeStringNode makeStringNode = MakeStringNode.create();
 
         @TruffleBoundary
-        @Specialization
-        protected int main(RubyString kind, RubyString toExecute) {
+        @Specialization(guards = { "stringsKind.isRubyString(kind)", "stringsToExecute.isRubyString(toExecute)" })
+        protected int main(Object kind, Object toExecute,
+                @CachedLibrary(limit = "2") RubyStringLibrary stringsKind,
+                @CachedLibrary(limit = "2") RubyStringLibrary stringsToExecute) {
             return topLevelRaiseHandler.execute(() -> {
                 setArgvGlobals();
 
                 // Need to set $0 before loading required libraries
                 // Also, a non-existing main script file errors out before loading required libraries
                 final RubySource source = loadMainSourceSettingDollarZero(
-                        kind.getJavaString(),
-                        toExecute.getJavaString().intern()); //intern() to improve footprint
+                        stringsKind.getJavaString(kind),
+                        stringsToExecute.getJavaString(toExecute).intern()); //intern() to improve footprint
 
                 // Load libraries required from the command line (-r LIBRARY)
                 for (String requiredLibrary : getContext().getOptions().REQUIRED_LIBRARIES) {
@@ -300,8 +303,9 @@ public abstract class TruffleBootNodes {
         @Child private MakeStringNode makeStringNode = MakeStringNode.create();
 
         @TruffleBoundary
-        @Specialization
-        protected Object getOption(RubyString optionName) {
+        @Specialization(guards = "libOptionName.isRubyString(optionName)")
+        protected Object getOption(Object optionName,
+                @CachedLibrary(limit = "2") RubyStringLibrary libOptionName) {
             if (getContext().isPreInitializing()) {
                 throw new RaiseException(
                         getContext(),
@@ -311,16 +315,18 @@ public abstract class TruffleBootNodes {
                                 this));
             }
 
-            final String optionNameString = optionName.getJavaString();
+            final String optionNameString = libOptionName.getJavaString(optionName);
             final OptionDescriptor descriptor = OptionsCatalog.fromName("ruby." + optionNameString);
-
             if (descriptor == null) {
                 throw new RaiseException(
                         getContext(),
                         coreExceptions().nameError("option not defined", nil, optionNameString, this));
             }
 
-            final Object value = getContext().getOptions().fromDescriptor(descriptor);
+            Object value = getContext().getOptions().fromDescriptor(descriptor);
+            if (value == null) {
+                value = getLanguage().options.fromDescriptor(descriptor);
+            }
 
             if (value instanceof Boolean || value instanceof Integer) {
                 return value;
@@ -331,7 +337,8 @@ public abstract class TruffleBootNodes {
             } else if (value instanceof String[]) {
                 return toRubyArray((String[]) value);
             } else {
-                throw CompilerDirectives.shouldNotReachHere();
+                throw CompilerDirectives
+                        .shouldNotReachHere("Unknown value for option " + optionNameString + ": " + value);
             }
         }
 

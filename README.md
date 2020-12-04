@@ -123,7 +123,7 @@ We recommend that people trying TruffleRuby on their gems and applications
 [get in touch with us](#contact) for help.
 
 TruffleRuby can run Rails and is compatible with many gems, including C extensions.
-TruffleRuby is not 100% compatible with MRI 2.6 yet though, please report any compatibility issue you might find.
+TruffleRuby is not 100% compatible with MRI 2.7 yet though, please report any compatibility issue you might find.
 TruffleRuby [passes around 97% of ruby/spec](https://eregon.me/blog/2020/06/27/ruby-spec-compatibility-report.html),
 more than any other alternative Ruby implementation.
 
@@ -181,7 +181,8 @@ Announcements about GraalVM, including TruffleRuby, are made on the
 
 The main authors of TruffleRuby ordered by first contribution are:
 Chris Seaton, Benoit Daloze, Kevin Menard, Petr Chalupa, Brandon Fish, Duncan
-MacGregor, Christian Wirth, Rafael França, Alan Wu, Nicolas Laurent, Carol Chen.
+MacGregor, Christian Wirth, Rafael França, Alan Wu, Nicolas Laurent, Carol Chen,
+Nikolay Sverchkov, Lillian Zhang.
 
 ## Security
 

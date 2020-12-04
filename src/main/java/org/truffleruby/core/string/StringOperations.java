@@ -43,6 +43,7 @@ import org.truffleruby.RubyContext;
 import org.truffleruby.RubyLanguage;
 import org.truffleruby.core.array.ArrayOperations;
 import org.truffleruby.core.rope.CodeRange;
+import org.truffleruby.core.rope.LeafRope;
 import org.truffleruby.core.rope.Rope;
 import org.truffleruby.core.rope.RopeOperations;
 
@@ -52,11 +53,10 @@ import org.truffleruby.language.objects.AllocationTracing;
 
 public abstract class StringOperations {
 
-    public static RubyString createString(RubyContext context, RubyContextSourceNode node, Rope rope) {
+    public static RubyString createString(RubyContextSourceNode node, Rope rope) {
         final RubyString instance = new RubyString(
-                context.getCoreLibrary().stringClass,
-                RubyLanguage.stringShape,
-                false,
+                node.getContext().getCoreLibrary().stringClass,
+                node.getLanguage().stringShape,
                 false,
                 rope);
         AllocationTracing.trace(instance, node);
@@ -64,22 +64,10 @@ public abstract class StringOperations {
     }
 
     // TODO BJF Aug-3-2020 Trace more allocations of RubyString
-    public static RubyString createString(RubyContext context, Rope rope) {
+    public static RubyString createString(RubyContext context, RubyLanguage language, Rope rope) {
         final RubyString instance = new RubyString(
                 context.getCoreLibrary().stringClass,
-                RubyLanguage.stringShape,
-                false,
-                false,
-                rope);
-        return instance;
-    }
-
-    // TODO BJF Aug-3-2020 Trace more allocations of RubyString
-    public static RubyString createFrozenString(RubyContext context, Rope rope) {
-        final RubyString instance = new RubyString(
-                context.getCoreLibrary().stringClass,
-                RubyLanguage.stringShape,
-                true,
+                language.stringShape,
                 false,
                 rope);
         return instance;
@@ -113,7 +101,7 @@ public abstract class StringOperations {
         return bytes;
     }
 
-    public static Rope encodeRope(String value, Encoding encoding, CodeRange codeRange) {
+    public static LeafRope encodeRope(String value, Encoding encoding, CodeRange codeRange) {
         if (codeRange == CodeRange.CR_7BIT) {
             return RopeOperations.encodeAscii(value, encoding);
         }
@@ -123,12 +111,8 @@ public abstract class StringOperations {
         return RopeOperations.create(bytes, encoding, codeRange);
     }
 
-    public static Rope encodeRope(String value, Encoding encoding) {
+    public static LeafRope encodeRope(String value, Encoding encoding) {
         return encodeRope(value, encoding, CodeRange.CR_UNKNOWN);
-    }
-
-    public static void setRope(RubyString string, Rope rope) {
-        string.rope = rope;
     }
 
     public static boolean isAsciiOnly(String string) {

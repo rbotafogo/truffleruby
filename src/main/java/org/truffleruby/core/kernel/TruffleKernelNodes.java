@@ -11,6 +11,7 @@ package org.truffleruby.core.kernel;
 
 import java.io.IOException;
 
+import com.oracle.truffle.api.library.CachedLibrary;
 import org.truffleruby.Layouts;
 import org.truffleruby.builtins.CoreMethod;
 import org.truffleruby.builtins.CoreMethodArrayArgumentsNode;
@@ -23,19 +24,19 @@ import org.truffleruby.core.cast.BooleanCastWithDefaultNodeGen;
 import org.truffleruby.core.kernel.TruffleKernelNodesFactory.GetSpecialVariableStorageNodeGen;
 import org.truffleruby.core.module.ModuleNodes;
 import org.truffleruby.core.module.RubyModule;
-import org.truffleruby.core.string.RubyString;
 import org.truffleruby.core.proc.RubyProc;
 import org.truffleruby.core.symbol.RubySymbol;
 import org.truffleruby.language.Nil;
 import org.truffleruby.language.RubyContextNode;
 import org.truffleruby.language.RubyNode;
 import org.truffleruby.language.RubyRootNode;
-import org.truffleruby.language.arguments.ReadCallerStorageNode;
+import org.truffleruby.language.arguments.ReadCallerVariablesNode;
 import org.truffleruby.language.arguments.RubyArguments;
 import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.dispatch.DispatchNode;
 import org.truffleruby.language.globals.ReadSimpleGlobalVariableNode;
 import org.truffleruby.language.globals.WriteSimpleGlobalVariableNode;
+import org.truffleruby.language.library.RubyStringLibrary;
 import org.truffleruby.language.loader.CodeLoader;
 import org.truffleruby.language.loader.FileLoader;
 import org.truffleruby.language.methods.DeclarationContext;
@@ -85,10 +86,11 @@ public abstract class TruffleKernelNodes {
         }
 
         @TruffleBoundary
-        @Specialization
-        protected boolean load(RubyString file, boolean wrap,
+        @Specialization(guards = "strings.isRubyString(file)")
+        protected boolean load(Object file, boolean wrap,
+                @CachedLibrary(limit = "2") RubyStringLibrary strings,
                 @Cached IndirectCallNode callNode) {
-            final String feature = file.getJavaString();
+            final String feature = strings.getJavaString(file);
             final RubySource source;
             try {
                 final FileLoader fileLoader = new FileLoader(getContext());
@@ -234,25 +236,41 @@ public abstract class TruffleKernelNodes {
                 @Cached("declarationDescriptor(frame, declarationFrameDepth)") FrameDescriptor declarationFrameDescriptor,
                 @Cached("declarationSlot(declarationFrameDescriptor)") FrameSlot declarationFrameSlot,
                 @Cached("declarationFrameDescriptor.getVersion()") Assumption frameAssumption) {
-            Object storage;
+            Object variables;
             if (declarationFrameDepth == 0) {
-                storage = FrameUtil.getObjectSafe(frame, declarationFrameSlot);
-                if (storage == nil) {
+                variables = FrameUtil.getObjectSafe(frame, declarationFrameSlot);
+                if (variables == nil) {
                     CompilerDirectives.transferToInterpreterAndInvalidate();
-                    storage = new SpecialVariableStorage();
-                    frame.setObject(declarationFrameSlot, storage);
+                    variables = new SpecialVariableStorage();
+                    frame.setObject(declarationFrameSlot, variables);
                 }
             } else {
                 MaterializedFrame storageFrame = RubyArguments.getDeclarationFrame(frame, declarationFrameDepth);
 
-                storage = FrameUtil.getObjectSafe(storageFrame, declarationFrameSlot);
-                if (storage == nil) {
+                if (storageFrame == null) {
                     CompilerDirectives.transferToInterpreterAndInvalidate();
-                    storage = new SpecialVariableStorage();
-                    storageFrame.setObject(declarationFrameSlot, storage);
+                    int depth = 0;
+                    MaterializedFrame currentFrame = RubyArguments.getDeclarationFrame(frame);
+                    while (currentFrame != null) {
+                        depth += 1;
+                        currentFrame = RubyArguments.getDeclarationFrame(currentFrame);
+                    }
+
+                    String message = String.format(
+                            "Expected %d declaration frames but only found %d frames.",
+                            declarationFrameDepth,
+                            depth);
+                    throw CompilerDirectives.shouldNotReachHere(message.toString());
+                }
+
+                variables = FrameUtil.getObjectSafe(storageFrame, declarationFrameSlot);
+                if (variables == nil) {
+                    CompilerDirectives.transferToInterpreterAndInvalidate();
+                    variables = new SpecialVariableStorage();
+                    storageFrame.setObject(declarationFrameSlot, variables);
                 }
             }
-            return (SpecialVariableStorage) storage;
+            return (SpecialVariableStorage) variables;
         }
 
         @Specialization(replaces = "getFromKnownFrameDescriptor")
@@ -267,12 +285,12 @@ public abstract class TruffleKernelNodes {
             while (true) {
                 final FrameSlot slot = getVariableSlot(frame);
                 if (slot != null) {
-                    Object storage = FrameUtil.getObjectSafe(frame, slot);
-                    if (storage == Nil.INSTANCE) {
-                        storage = new SpecialVariableStorage();
-                        frame.setObject(slot, storage);
+                    Object variables = FrameUtil.getObjectSafe(frame, slot);
+                    if (variables == Nil.INSTANCE) {
+                        variables = new SpecialVariableStorage();
+                        frame.setObject(slot, variables);
                     }
-                    return (SpecialVariableStorage) storage;
+                    return (SpecialVariableStorage) variables;
                 }
 
                 final MaterializedFrame nextFrame = RubyArguments.getDeclarationFrame(frame);
@@ -282,9 +300,9 @@ public abstract class TruffleKernelNodes {
                     FrameSlot newSlot = frame
                             .getFrameDescriptor()
                             .findOrAddFrameSlot(Layouts.SPECIAL_VARIABLES_STORAGE);
-                    SpecialVariableStorage storage = new SpecialVariableStorage();
-                    frame.setObject(newSlot, storage);
-                    return storage;
+                    SpecialVariableStorage variables = new SpecialVariableStorage();
+                    frame.setObject(newSlot, variables);
+                    return variables;
                 }
             }
         }
@@ -297,11 +315,11 @@ public abstract class TruffleKernelNodes {
     @Primitive(name = "caller_special_variables")
     public abstract static class GetCallerSpecialVariableStorage extends PrimitiveArrayArgumentsNode {
 
-        @Child ReadCallerStorageNode callerStorageNode = new ReadCallerStorageNode();
+        @Child ReadCallerVariablesNode callerVariablesNode = new ReadCallerVariablesNode();
 
         @Specialization
         protected Object storage(VirtualFrame frame) {
-            return callerStorageNode.execute(frame);
+            return callerVariablesNode.execute(frame);
         }
     }
 
@@ -309,8 +327,8 @@ public abstract class TruffleKernelNodes {
     public abstract static class GetProcSpecialVariableStorage extends PrimitiveArrayArgumentsNode {
 
         @Specialization
-        protected Object storage(VirtualFrame frame, RubyProc proc) {
-            return proc.declarationStorage;
+        protected Object variables(VirtualFrame frame, RubyProc proc) {
+            return proc.declarationVariables;
         }
     }
 
@@ -376,10 +394,10 @@ public abstract class TruffleKernelNodes {
     public abstract static class SetRegexpMatch extends PrimitiveArrayArgumentsNode {
 
         @Specialization
-        protected Object executeSetRegexpMatch(SpecialVariableStorage storage, Object lastMatch,
+        protected Object executeSetRegexpMatch(SpecialVariableStorage variables, Object lastMatch,
                 @Cached ConditionProfile unsetProfile,
                 @Cached ConditionProfile sameThreadProfile) {
-            storage.setLastMatch(lastMatch, getContext(), unsetProfile, sameThreadProfile);
+            variables.setLastMatch(lastMatch, getContext(), unsetProfile, sameThreadProfile);
             return lastMatch;
         }
     }
@@ -388,10 +406,10 @@ public abstract class TruffleKernelNodes {
     public abstract static class GetRegexpMatch extends PrimitiveArrayArgumentsNode {
 
         @Specialization
-        protected Object executeSetRegexpMatch(SpecialVariableStorage storage,
+        protected Object executeSetRegexpMatch(SpecialVariableStorage variables,
                 @Cached ConditionProfile unsetProfile,
                 @Cached ConditionProfile sameThreadProfile) {
-            return storage.getLastMatch(unsetProfile, sameThreadProfile);
+            return variables.getLastMatch(unsetProfile, sameThreadProfile);
         }
     }
 
@@ -399,10 +417,10 @@ public abstract class TruffleKernelNodes {
     public abstract static class SetLastIO extends PrimitiveArrayArgumentsNode {
 
         @Specialization
-        protected Object executeSetRegexpMatch(SpecialVariableStorage storage, Object lastIO,
+        protected Object executeSetRegexpMatch(SpecialVariableStorage variables, Object lastIO,
                 @Cached ConditionProfile unsetProfile,
                 @Cached ConditionProfile sameThreadProfile) {
-            storage.setLastLine(lastIO, getContext(), unsetProfile, sameThreadProfile);
+            variables.setLastLine(lastIO, getContext(), unsetProfile, sameThreadProfile);
             return lastIO;
         }
     }

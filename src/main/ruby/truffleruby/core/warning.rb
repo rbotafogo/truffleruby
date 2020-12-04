@@ -22,4 +22,25 @@ module Warning
     nil
   end
 
+  def self.[](category)
+    case category
+    when :deprecated
+      Primitive.warning_get_category(:deprecated)
+    when :experimental
+      Primitive.warning_get_category(:experimental)
+    else
+      raise ArgumentError, "unknown category: #{category}"
+    end
+  end
+
+  def self.[]=(category, value)
+    case category
+    when :deprecated
+      Primitive.warning_set_category(:deprecated, !!value)
+    when :experimental
+      Primitive.warning_set_category(:experimental, !!value)
+    else
+      raise ArgumentError, "unknown category: #{category}"
+    end
+  end
 end

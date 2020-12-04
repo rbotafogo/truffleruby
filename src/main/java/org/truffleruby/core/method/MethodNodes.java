@@ -10,7 +10,6 @@
 package org.truffleruby.core.method;
 
 import org.jcodings.specific.UTF8Encoding;
-import org.truffleruby.RubyLanguage;
 import org.truffleruby.builtins.CoreMethod;
 import org.truffleruby.builtins.CoreMethodArrayArgumentsNode;
 import org.truffleruby.builtins.CoreModule;
@@ -214,7 +213,7 @@ public abstract class MethodNodes {
             } else {
                 final RubyMethod instance = new RubyMethod(
                         coreLibrary().methodClass,
-                        RubyLanguage.methodShape,
+                        getLanguage().methodShape,
                         receiver,
                         superMethod.getMethod());
                 AllocationTracing.trace(instance, this);
@@ -231,10 +230,10 @@ public abstract class MethodNodes {
 
         @Specialization
         protected RubyUnboundMethod unbind(RubyMethod method) {
-            final RubyClass receiverClass = classNode.executeLogicalClass(method.receiver);
+            final RubyClass receiverClass = classNode.execute(method.receiver);
             final RubyUnboundMethod instance = new RubyUnboundMethod(
                     coreLibrary().unboundMethodClass,
-                    RubyLanguage.unboundMethodShape,
+                    getLanguage().unboundMethodShape,
                     receiverClass,
                     method.method);
             AllocationTracing.trace(instance, this);
@@ -273,21 +272,21 @@ public abstract class MethodNodes {
 
         private RubyProc createProc(RootCallTarget callTarget, InternalMethod method, Object receiver) {
             final Object[] packedArgs = RubyArguments
-                    .pack(null, null, null, method, null, receiver, null, EMPTY_ARGUMENTS);
+                    .pack(null, null, method, null, receiver, null, EMPTY_ARGUMENTS);
             final MaterializedFrame declarationFrame = Truffle
                     .getRuntime()
                     .createMaterializedFrame(packedArgs, coreLibrary().emptyDeclarationDescriptor);
-            SpecialVariableStorage storage = new SpecialVariableStorage();
-            declarationFrame.setObject(coreLibrary().emptyDeclarationSpecialVariableSlot, storage);
+            SpecialVariableStorage variables = new SpecialVariableStorage();
+            declarationFrame.setObject(coreLibrary().emptyDeclarationSpecialVariableSlot, variables);
             return ProcOperations.createRubyProc(
                     coreLibrary().procClass,
-                    RubyLanguage.procShape,
+                    getLanguage().procShape,
                     ProcType.LAMBDA,
                     method.getSharedMethodInfo(),
                     callTarget,
                     callTarget,
                     declarationFrame,
-                    storage,
+                    variables,
                     method,
                     null,
                     null,
@@ -305,7 +304,7 @@ public abstract class MethodNodes {
 
             final SetReceiverNode setReceiverNode = new SetReceiverNode(method.getCallTarget());
             final RootNode newRootNode = new RubyRootNode(
-                    getContext(),
+                    getLanguage(),
                     sourceSection,
                     oldRootNode.getFrameDescriptor(),
                     method.getSharedMethodInfo(),
@@ -367,6 +366,9 @@ public abstract class MethodNodes {
         public Object execute(VirtualFrame frame) {
             Object receiver = RubyArguments.getSelf(RubyArguments.getDeclarationFrame(frame));
             RubyArguments.setSelf(frame, receiver);
+            /* Remove the declaration frame from the arguments so that the method will not see the special variables
+             * associated with the proc. This matches the behaviour in MRI. */
+            RubyArguments.setDeclarationFrame(frame, null);
             return methodCallNode.call(frame.getArguments());
         }
 

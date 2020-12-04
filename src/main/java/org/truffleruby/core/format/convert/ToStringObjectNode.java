@@ -13,16 +13,15 @@ import com.oracle.truffle.api.library.CachedLibrary;
 import org.truffleruby.core.cast.ToStrNode;
 import org.truffleruby.core.format.FormatNode;
 import org.truffleruby.core.format.exceptions.NoImplicitConversionException;
-import org.truffleruby.core.string.RubyString;
 import org.truffleruby.language.Nil;
 import org.truffleruby.language.RubyGuards;
-import org.truffleruby.language.library.RubyLibrary;
 
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.profiles.ConditionProfile;
+import org.truffleruby.language.library.RubyStringLibrary;
 
 @NodeChild("value")
 public abstract class ToStringObjectNode extends FormatNode {
@@ -34,24 +33,19 @@ public abstract class ToStringObjectNode extends FormatNode {
         return nil;
     }
 
-    @Specialization(limit = "getRubyLibraryCacheLimit()")
-    protected Object toStringString(VirtualFrame frame, RubyString string,
-            @CachedLibrary("string") RubyLibrary rubyLibrary,
-            @Cached ConditionProfile taintedProfile) {
-        if (taintedProfile.profile(rubyLibrary.isTainted(string))) {
-            setTainted(frame);
-        }
-
+    @Specialization(guards = "strings.isRubyString(string)")
+    protected Object toStringString(Object string,
+            @CachedLibrary(limit = "2") RubyStringLibrary strings) {
         return string;
     }
 
-    @Specialization(guards = "!isRubyString(object)")
+    @Specialization(guards = "isNotRubyString(object)")
     protected Object toString(VirtualFrame frame, Object object,
             @Cached ConditionProfile notStringProfile,
             @Cached ToStrNode toStrNode) {
         final Object value = toStrNode.executeToStr(object);
 
-        if (notStringProfile.profile(!RubyGuards.isRubyString(value))) {
+        if (notStringProfile.profile(RubyGuards.isNotRubyString(value))) {
             throw new NoImplicitConversionException(object, "String");
         }
 

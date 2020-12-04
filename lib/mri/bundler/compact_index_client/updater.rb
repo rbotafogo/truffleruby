@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "bundler/vendored_fileutils"
+require_relative "../vendored_fileutils"
 require "stringio"
 require "zlib"
 
@@ -47,7 +47,9 @@ module Bundler
               end
           else
             # Fastly ignores Range when Accept-Encoding: gzip is set
-            headers["Accept-Encoding"] = "gzip"
+            unless defined?(::TruffleRuby) # let Net::HTTP handle decompression, which is more memory efficient
+              headers["Accept-Encoding"] = "gzip"
+            end
           end
 
           response = @fetcher.call(remote_path, headers)
@@ -55,6 +57,7 @@ module Bundler
 
           content = response.body
           if response["Content-Encoding"] == "gzip"
+            warn "Net::HTTP should have decompressed a gzip-encoded body" if defined?(::TruffleRuby)
             content = Zlib::GzipReader.new(StringIO.new(content)).read
           end
 
@@ -95,11 +98,7 @@ module Bundler
       end
 
       def slice_body(body, range)
-        if body.respond_to?(:byteslice)
-          body.byteslice(range)
-        else # pre-1.9.3
-          body.unpack("@#{range.first}a#{range.end + 1}").first
-        end
+        body.byteslice(range)
       end
 
       def checksum_for_file(path)

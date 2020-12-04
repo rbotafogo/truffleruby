@@ -22,14 +22,13 @@ import com.oracle.truffle.api.profiles.ConditionProfile;
 
 public class ReadRejectedKeywordArgumentsNode extends RubyContextNode implements BiConsumerNode {
 
-    @Child private ReadUserKeywordsHashNode readUserKeywordsHashNode;
     @Child private EachKeyValueNode eachKeyNode = EachKeyValueNode.create();
     @Child private SetNode setNode = SetNode.create();
 
     private final ConditionProfile isSymbolProfile = ConditionProfile.create();
 
     public RubyHash extractRejectedKwargs(VirtualFrame frame, RubyHash kwargsHash) {
-        final RubyHash rejectedKwargs = HashOperations.newEmptyHash(getContext());
+        final RubyHash rejectedKwargs = HashOperations.newEmptyHash(getContext(), getLanguage());
         eachKeyNode.executeEachKeyValue(frame, kwargsHash, this, rejectedKwargs);
         return rejectedKwargs;
     }

@@ -11,6 +11,7 @@ package org.truffleruby.core.hash;
 
 import java.util.Arrays;
 
+import com.oracle.truffle.api.object.Shape;
 import org.truffleruby.RubyLanguage;
 import org.truffleruby.builtins.CoreMethod;
 import org.truffleruby.builtins.CoreMethodArrayArgumentsNode;
@@ -22,7 +23,6 @@ import org.truffleruby.collections.BiConsumerNode;
 import org.truffleruby.collections.BiFunctionNode;
 import org.truffleruby.core.array.ArrayBuilderNode;
 import org.truffleruby.core.array.ArrayBuilderNode.BuilderState;
-import org.truffleruby.core.array.ArrayHelpers;
 import org.truffleruby.core.array.RubyArray;
 import org.truffleruby.core.hash.HashNodesFactory.EachKeyValueNodeGen;
 import org.truffleruby.core.hash.HashNodesFactory.HashLookupOrExecuteDefaultNodeGen;
@@ -37,7 +37,6 @@ import org.truffleruby.language.RubyGuards;
 import org.truffleruby.language.Visibility;
 import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.dispatch.DispatchNode;
-import org.truffleruby.language.objects.AllocateHelperNode;
 import org.truffleruby.language.objects.AllocationTracing;
 import org.truffleruby.language.objects.shared.PropagateSharingNode;
 import org.truffleruby.language.yield.YieldNode;
@@ -54,39 +53,25 @@ import com.oracle.truffle.api.nodes.LoopNode;
 import com.oracle.truffle.api.profiles.BranchProfile;
 import com.oracle.truffle.api.profiles.ConditionProfile;
 
-
 @CoreModule(value = "Hash", isClass = true)
 public abstract class HashNodes {
 
     @CoreMethod(names = { "__allocate__", "__layout_allocate__" }, constructor = true, visibility = Visibility.PRIVATE)
     public abstract static class AllocateNode extends CoreMethodArrayArgumentsNode {
 
-        @Child private AllocateHelperNode helperNode = AllocateHelperNode.create();
-
         @Specialization
         protected RubyHash allocate(RubyClass rubyClass) {
-            RubyHash hash = new RubyHash(
-                    rubyClass,
-                    helperNode.getCachedShape(rubyClass),
-                    getContext(),
-                    null,
-                    0,
-                    null,
-                    null,
-                    nil,
-                    nil,
-                    false);
+            final Shape shape = getLanguage().hashShape;
+            final RubyHash hash = new RubyHash(rubyClass, shape, getContext(), null, 0, null, null, nil, nil, false);
             AllocationTracing.trace(hash, this);
             return hash;
         }
-
     }
 
     @CoreMethod(names = "[]", constructor = true, rest = true)
     @ImportStatic(HashGuards.class)
     public abstract static class ConstructNode extends CoreMethodArrayArgumentsNode {
 
-        @Child private AllocateHelperNode helperNode = AllocateHelperNode.create();
         @Child private DispatchNode fallbackNode = DispatchNode.create();
 
         @ExplodeLoop(kind = LoopExplosionKind.FULL_UNROLL)
@@ -127,17 +112,8 @@ public abstract class HashNodes {
                 }
             }
 
-            return new RubyHash(
-                    hashClass,
-                    helperNode.getCachedShape(hashClass),
-                    getContext(),
-                    newStore,
-                    size,
-                    null,
-                    null,
-                    nil,
-                    nil,
-                    false);
+            final Shape shape = getLanguage().hashShape;
+            return new RubyHash(hashClass, shape, getContext(), newStore, size, null, null, nil, nil, false);
         }
 
         @Specialization(guards = "!isSmallArrayOfPairs(args, getLanguage())")
@@ -172,6 +148,23 @@ public abstract class HashNodes {
             return true;
         }
 
+    }
+
+    @CoreMethod(names = "ruby2_keywords_hash?", onSingleton = true, required = 1)
+    public abstract static class IsRuby2KeywordsHashNode extends CoreMethodArrayArgumentsNode {
+        @Specialization
+        protected boolean isRuby2KeywordsHash(RubyHash hash) {
+            return hash.ruby2_keywords;
+        }
+    }
+
+    @Primitive(name = "hash_mark_ruby2_keywords")
+    public abstract static class HashMarkRuby2KeywordsNode extends CoreMethodArrayArgumentsNode {
+        @Specialization
+        protected RubyHash markRuby2Keywords(RubyHash hash) {
+            hash.ruby2_keywords = true;
+            return hash;
+        }
     }
 
     @ImportStatic(HashGuards.class)
@@ -668,7 +661,7 @@ public abstract class HashNodes {
         @Specialization(guards = "isNullHash(hash)")
         protected RubyArray mapNull(RubyHash hash, RubyProc block) {
             assert HashOperations.verifyStore(getContext(), hash);
-            return ArrayHelpers.createEmptyArray(getContext());
+            return createEmptyArray();
         }
 
         @ExplodeLoop

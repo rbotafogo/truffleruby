@@ -28,6 +28,10 @@ void *ruby_xmalloc2(size_t n, size_t size) {
   return malloc(xmalloc2_size(n, total_size));
 }
 
+void* rb_xmalloc_mul_add(size_t x, size_t y, size_t z) {
+  return ruby_xmalloc(x * y + z);
+}
+
 void *ruby_xcalloc(size_t n, size_t size) {
   return calloc(n, size);
 }
@@ -69,4 +73,13 @@ void rb_mem_clear(VALUE *mem, long n) {
   for (int i = 0; i < n; i++) {
     mem[i] = Qnil;
   }
+}
+
+VALUE rb_imemo_tmpbuf_auto_free_pointer(void) {
+  return RUBY_CEXT_INVOKE("rb_imemo_tmpbuf_auto_free_pointer");
+}
+
+void* rb_imemo_tmpbuf_set_ptr(VALUE imemo, void *ptr) {
+  polyglot_invoke(RUBY_CEXT, "rb_imemo_tmpbuf_set_ptr", rb_tr_unwrap(imemo), ptr);
+  return ptr;
 }

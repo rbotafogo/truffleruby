@@ -18,11 +18,11 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
+import com.oracle.truffle.api.library.CachedLibrary;
 import org.truffleruby.RubyContext;
 import org.truffleruby.RubyLanguage;
 import org.truffleruby.core.array.ArrayUtils;
 import org.truffleruby.core.cast.BooleanCastNode;
-import org.truffleruby.core.string.RubyString;
 import org.truffleruby.interop.InteropNodes;
 import org.truffleruby.interop.TranslateInteropExceptionNode;
 import org.truffleruby.language.RubyConstant;
@@ -32,6 +32,7 @@ import org.truffleruby.language.WarningNode;
 import org.truffleruby.language.constants.GetConstantNode;
 import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.dispatch.DispatchNode;
+import org.truffleruby.language.library.RubyStringLibrary;
 import org.truffleruby.language.methods.DeclarationContext;
 import org.truffleruby.language.methods.TranslateExceptionNode;
 import org.truffleruby.parser.ParserContext;
@@ -57,16 +58,17 @@ public abstract class RequireNode extends RubyContextNode {
 
     @Child private WarningNode warningNode;
 
-    public abstract boolean executeRequire(String feature, RubyString expandedPath);
+    public abstract boolean executeRequire(String feature, Object expandedPath);
 
-    @Specialization
-    protected boolean require(String feature, RubyString expandedPathString) {
-        final String expandedPath = expandedPathString.getJavaString();
+    @Specialization(guards = "libExpandedPathString.isRubyString(expandedPathString)")
+    protected boolean require(String feature, Object expandedPathString,
+            @CachedLibrary(limit = "2") RubyStringLibrary libExpandedPathString) {
+        final String expandedPath = libExpandedPathString.getJavaString(expandedPathString);
         return requireWithMetrics(feature, expandedPath, expandedPathString);
     }
 
     @TruffleBoundary
-    private boolean requireWithMetrics(String feature, String expandedPathRaw, RubyString pathString) {
+    private boolean requireWithMetrics(String feature, String expandedPathRaw, Object pathString) {
         requireMetric("before-require-" + feature);
         try {
             //intern() to improve footprint
@@ -84,7 +86,7 @@ public abstract class RequireNode extends RubyContextNode {
      * re-select autoload constants (because their list can be supplemented with constants that are loaded themselves
      * (i.e. Object.autoload(:C, __FILE__))) and remove them from autoload registry. More details here:
      * https://github.com/oracle/truffleruby/pull/2060#issuecomment-668627142 **/
-    private boolean requireConsideringAutoload(String feature, String expandedPath, RubyString pathString) {
+    private boolean requireConsideringAutoload(String feature, String expandedPath, Object pathString) {
         final FeatureLoader featureLoader = getContext().getFeatureLoader();
         final List<RubyConstant> constantsUnfiltered = featureLoader.getAutoloadConstants(expandedPath);
         final List<RubyConstant> alreadyAutoloading = new ArrayList<>();
@@ -135,7 +137,7 @@ public abstract class RequireNode extends RubyContextNode {
         }
     }
 
-    private boolean doRequire(String originalFeature, String expandedPath, RubyString pathString) {
+    private boolean doRequire(String originalFeature, String expandedPath, Object pathString) {
         final ReentrantLockFreeingMap<String> fileLocks = getContext().getFeatureLoader().getFileLocks();
         final ConcurrentMap<String, Boolean> patchFiles = getContext().getCoreLibrary().getPatchFiles();
         String relativeFeature = originalFeature;
@@ -319,7 +321,7 @@ public abstract class RequireNode extends RubyContextNode {
     private void handleCExtensionException(String feature, Exception e) {
         TranslateExceptionNode.logJavaException(getContext(), this, e);
 
-        final UnsatisfiedLinkError linkErrorException = searchForException(UnsatisfiedLinkError.class, e);
+        final Throwable linkErrorException = searchForException("NFIUnsatisfiedLinkError", e);
         if (linkErrorException != null) {
             final String linkError = linkErrorException.getMessage();
 
@@ -363,17 +365,6 @@ public abstract class RequireNode extends RubyContextNode {
         }
     }
 
-    private <T extends Throwable> T searchForException(Class<T> exceptionClass, Throwable exception) {
-        while (exception != null) {
-            if (exceptionClass.isInstance(exception)) {
-                return exceptionClass.cast(exception);
-            }
-            exception = exception.getCause();
-        }
-
-        return null;
-    }
-
     private Throwable searchForException(String exceptionClass, Throwable exception) {
         while (exception != null) {
             if (exception.getClass().getSimpleName().equals(exceptionClass)) {
@@ -396,7 +387,7 @@ public abstract class RequireNode extends RubyContextNode {
         }
     }
 
-    public boolean isFeatureLoaded(RubyString feature) {
+    public boolean isFeatureLoaded(Object feature) {
         final Object included;
         synchronized (getContext().getFeatureLoader().getLoadedFeaturesLock()) {
             included = isInLoadedFeatures
@@ -405,7 +396,7 @@ public abstract class RequireNode extends RubyContextNode {
         return booleanCastNode.executeToBoolean(included);
     }
 
-    private void addToLoadedFeatures(RubyString feature) {
+    private void addToLoadedFeatures(Object feature) {
         synchronized (getContext().getFeatureLoader().getLoadedFeaturesLock()) {
             addToLoadedFeatures.call(coreLibrary().truffleFeatureLoaderModule, "provide_feature", feature);
         }

@@ -28,7 +28,6 @@ import org.truffleruby.core.basicobject.BasicObjectNodes.ObjectIDNode;
 import org.truffleruby.core.klass.ClassNodes;
 import org.truffleruby.core.klass.RubyClass;
 import org.truffleruby.core.method.MethodFilter;
-import org.truffleruby.core.string.RubyString;
 import org.truffleruby.core.string.StringUtils;
 import org.truffleruby.core.symbol.RubySymbol;
 import org.truffleruby.language.RubyConstant;
@@ -37,6 +36,7 @@ import org.truffleruby.language.RubyGuards;
 import org.truffleruby.language.constants.GetConstantNode;
 import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.library.RubyLibrary;
+import org.truffleruby.language.library.RubyStringLibrary;
 import org.truffleruby.language.loader.ReentrantLockFreeingMap;
 import org.truffleruby.language.methods.InternalMethod;
 import org.truffleruby.language.objects.ObjectGraph;
@@ -203,10 +203,12 @@ public class ModuleFields extends ModuleChain implements ObjectGraphNode {
     public void checkFrozen(RubyContext context, Node currentNode) {
         if (context.getCoreLibrary() != null && RubyLibrary.getUncached().isFrozen(rubyModule)) {
             String name;
+            Object receiver = rubyModule;
             if (rubyModule instanceof RubyClass) {
                 final RubyClass cls = (RubyClass) rubyModule;
                 name = "object";
                 if (cls.isSingleton) {
+                    receiver = cls.attached;
                     if (cls.attached instanceof RubyClass) {
                         name = "Class";
                     } else if (cls.attached instanceof RubyModule) {
@@ -222,7 +224,8 @@ public class ModuleFields extends ModuleChain implements ObjectGraphNode {
                     context,
                     context.getCoreExceptions().frozenError(
                             StringUtils.format("can't modify frozen %s", name),
-                            currentNode));
+                            currentNode,
+                            receiver));
         }
     }
 
@@ -237,7 +240,7 @@ public class ModuleFields extends ModuleChain implements ObjectGraphNode {
                     context.getCoreExceptions().argumentError("cyclic include detected", currentNode));
         }
 
-        SharedObjects.propagate(context, rubyModule, module);
+        SharedObjects.propagate(context.getLanguageSlow(), rubyModule, module);
 
         // We need to include the module ancestors in reverse order for a given inclusionPoint
         ModuleChain inclusionPoint = this;
@@ -296,7 +299,7 @@ public class ModuleFields extends ModuleChain implements ObjectGraphNode {
                     context.getCoreExceptions().argumentError("cyclic prepend detected", currentNode));
         }
 
-        SharedObjects.propagate(context, rubyModule, module);
+        SharedObjects.propagate(context.getLanguageSlow(), rubyModule, module);
 
         ModuleChain mod = module.fields.start;
         final ModuleChain topPrependedModule = start.getParentModule();
@@ -337,7 +340,8 @@ public class ModuleFields extends ModuleChain implements ObjectGraphNode {
     }
 
     @TruffleBoundary
-    public void setAutoloadConstant(RubyContext context, Node currentNode, String name, RubyString filename) {
+    public void setAutoloadConstant(RubyContext context, Node currentNode, String name, Object filename,
+            String javaFilename) {
         RubyConstant autoloadConstant = setConstantInternal(context, currentNode, name, filename, true);
         if (autoloadConstant == null) {
             return;
@@ -351,7 +355,7 @@ public class ModuleFields extends ModuleChain implements ObjectGraphNode {
                     filename));
         }
         final ReentrantLockFreeingMap<String> fileLocks = getContext().getFeatureLoader().getFileLocks();
-        final ReentrantLock lock = fileLocks.get(filename.getJavaString());
+        final ReentrantLock lock = fileLocks.get(javaFilename);
         if (lock.isLocked()) {
             // We need to handle the new autoload constant immediately
             // if Object.autoload(name, filename) is executed from filename.rb
@@ -365,9 +369,11 @@ public class ModuleFields extends ModuleChain implements ObjectGraphNode {
             boolean autoload) {
         checkFrozen(context, currentNode);
 
-        SharedObjects.propagate(context, rubyModule, value);
+        SharedObjects.propagate(context.getLanguageSlow(), rubyModule, value);
 
-        final String autoloadPath = autoload ? ((RubyString) value).getJavaString() : null;
+        final String autoloadPath = autoload
+                ? RubyStringLibrary.getUncached().getJavaString(value)
+                : null;
         RubyConstant previous;
         RubyConstant newConstant;
         do {
@@ -420,7 +426,7 @@ public class ModuleFields extends ModuleChain implements ObjectGraphNode {
             Set<Object> adjacent = ObjectGraph.newObjectSet();
             ObjectGraph.addProperty(adjacent, method);
             for (Object object : adjacent) {
-                SharedObjects.writeBarrier(context, object);
+                SharedObjects.writeBarrier(context.getLanguageSlow(), object);
             }
         }
 

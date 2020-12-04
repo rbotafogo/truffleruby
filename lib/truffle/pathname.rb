@@ -1,3 +1,4 @@
+# truffleruby_primitives: true
 #
 # = pathname.rb
 #
@@ -223,12 +224,20 @@ class Pathname
 
     @path = path.dup
 
-    self.taint if @path.tainted?
+    self
   end
 
   def freeze() super; @path.freeze; self end
-  def taint() super; @path.taint; self end
-  def untaint() super; @path.untaint; self end
+
+  def taint
+    warn 'Pathname#taint is deprecated and will be removed in Ruby 3.2.', uplevel: 1 if $VERBOSE
+    self
+  end
+
+  def untaint
+    warn 'Pathname#untaint is deprecated and will be removed in Ruby 3.2.', uplevel: 1 if $VERBOSE
+    self
+  end
 
   #
   # Compare this pathname with +other+.  The comparison is string-based.
@@ -1060,7 +1069,8 @@ module Kernel
   #
   # This method is available since 1.8.5.
   def Pathname(path) # :doc:
+    return path if Primitive.class_of(path) == Pathname
     Pathname.new(path)
   end
-  private :Pathname # Truffle: private as in MRI
+  module_function :Pathname
 end

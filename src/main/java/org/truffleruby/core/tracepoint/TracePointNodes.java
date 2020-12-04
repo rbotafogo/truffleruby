@@ -35,12 +35,10 @@ import org.truffleruby.language.Visibility;
 import org.truffleruby.language.arguments.RubyArguments;
 import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.methods.InternalMethod;
-import org.truffleruby.language.objects.AllocateHelperNode;
 
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Specialization;
-import com.oracle.truffle.api.object.Shape;
 import com.oracle.truffle.api.profiles.BranchProfile;
 import org.truffleruby.language.objects.AllocationTracing;
 
@@ -53,10 +51,10 @@ public abstract class TracePointNodes {
     }
 
     @TruffleBoundary
-    public static boolean createEventBindings(RubyContext context, RubyTracePoint tracePoint) {
+    public static boolean createEventBindings(RubyContext context, RubyLanguage language, RubyTracePoint tracePoint) {
         final TracePointEvent[] events = tracePoint.events;
         for (TracePointEvent event : events) {
-            if (!event.setupEventBinding(context, tracePoint)) {
+            if (!event.setupEventBinding(context, language, tracePoint)) {
                 return false;
             }
         }
@@ -76,17 +74,12 @@ public abstract class TracePointNodes {
 
     @CoreMethod(names = { "__allocate__", "__layout_allocate__" }, constructor = true, visibility = Visibility.PRIVATE)
     public abstract static class AllocateNode extends UnaryCoreMethodNode {
-
-        @Child private AllocateHelperNode allocateNode = AllocateHelperNode.create();
-
         @Specialization
         protected RubyTracePoint allocate(RubyClass rubyClass) {
-            final Shape shape = allocateNode.getCachedShape(rubyClass);
-            final RubyTracePoint instance = new RubyTracePoint(rubyClass, shape, null, null);
+            final RubyTracePoint instance = new RubyTracePoint(rubyClass, getLanguage().tracePointShape, null, null);
             AllocationTracing.trace(instance, this);
             return instance;
         }
-
     }
 
     @Primitive(name = "tracepoint_initialize")
@@ -127,13 +120,13 @@ public abstract class TracePointNodes {
 
         @Specialization
         protected boolean enable(RubyTracePoint tracePoint, NotProvided block) {
-            boolean setupDone = createEventBindings(getContext(), tracePoint);
+            boolean setupDone = createEventBindings(getContext(), getLanguage(), tracePoint);
             return !setupDone;
         }
 
         @Specialization
         protected Object enable(RubyTracePoint tracePoint, RubyProc block) {
-            final boolean setupDone = createEventBindings(getContext(), tracePoint);
+            final boolean setupDone = createEventBindings(getContext(), getLanguage(), tracePoint);
             try {
                 return yield(block);
             } finally {
@@ -159,7 +152,7 @@ public abstract class TracePointNodes {
                 return yield(block);
             } finally {
                 if (wasEnabled) {
-                    createEventBindings(getContext(), tracePoint);
+                    createEventBindings(getContext(), getLanguage(), tracePoint);
                 }
             }
         }

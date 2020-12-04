@@ -128,7 +128,7 @@ module RbConfig
 
   # Link to libtruffleruby by absolute path
   libtruffleruby_dir = File.dirname(libtruffleruby)
-  librubyarg = "-L#{libtruffleruby_dir} -rpath #{libtruffleruby_dir} -ltruffleruby -lpolyglot-mock"
+  librubyarg = "-L#{libtruffleruby_dir} -rpath #{libtruffleruby_dir} -ltruffleruby -lgraalvm-llvm"
 
   warnflags = warnflags.join(' ')
 
@@ -192,7 +192,7 @@ module RbConfig
     'target_cpu'        => host_cpu,
     'target_os'         => host_os,
     'UNICODE_VERSION'   => '12.0.0',
-    'UNICODE_EMOJI_VERSION' => '12.0',
+    'UNICODE_EMOJI_VERSION' => '12.1',
     'warnflags'         => warnflags,
   }
 

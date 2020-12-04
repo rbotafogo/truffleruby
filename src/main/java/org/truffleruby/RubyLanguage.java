@@ -12,11 +12,13 @@ package org.truffleruby;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 
 import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.instrumentation.AllocationReporter;
 import com.oracle.truffle.api.object.Shape;
 import org.graalvm.options.OptionDescriptors;
+import org.jcodings.Encoding;
 import org.truffleruby.builtins.PrimitiveManager;
 import org.truffleruby.core.RubyHandle;
 import org.truffleruby.core.array.RubyArray;
@@ -25,9 +27,12 @@ import org.truffleruby.core.binding.RubyBinding;
 import org.truffleruby.core.encoding.RubyEncoding;
 import org.truffleruby.core.encoding.RubyEncodingConverter;
 import org.truffleruby.core.exception.RubyException;
+import org.truffleruby.core.exception.RubyFrozenError;
 import org.truffleruby.core.exception.RubyNameError;
 import org.truffleruby.core.exception.RubyNoMethodError;
+import org.truffleruby.core.exception.RubySyntaxError;
 import org.truffleruby.core.exception.RubySystemCallError;
+import org.truffleruby.core.exception.RubySystemExit;
 import org.truffleruby.core.fiber.RubyFiber;
 import org.truffleruby.core.hash.RubyHash;
 import org.graalvm.options.OptionValues;
@@ -49,9 +54,11 @@ import org.truffleruby.core.range.RubyLongRange;
 import org.truffleruby.core.range.RubyObjectRange;
 import org.truffleruby.core.regexp.RubyMatchData;
 import org.truffleruby.core.regexp.RubyRegexp;
+import org.truffleruby.core.rope.CodeRange;
 import org.truffleruby.core.rope.Rope;
 import org.truffleruby.core.rope.RopeCache;
 import org.truffleruby.core.string.CoreStrings;
+import org.truffleruby.core.string.FrozenStringLiterals;
 import org.truffleruby.core.string.RubyString;
 import org.truffleruby.core.string.StringUtils;
 import org.truffleruby.core.support.RubyByteArray;
@@ -66,6 +73,7 @@ import org.truffleruby.core.time.RubyTime;
 import org.truffleruby.core.tracepoint.RubyTracePoint;
 import org.truffleruby.extra.RubyAtomicReference;
 import org.truffleruby.extra.ffi.RubyPointer;
+import org.truffleruby.core.string.ImmutableRubyString;
 import org.truffleruby.language.NotProvided;
 import org.truffleruby.language.RubyDynamicObject;
 import org.truffleruby.language.RubyEvalInteractiveRootNode;
@@ -91,7 +99,6 @@ import com.oracle.truffle.api.instrumentation.ProvidedTags;
 import com.oracle.truffle.api.instrumentation.StandardTags;
 import com.oracle.truffle.api.nodes.ExecutableNode;
 import com.oracle.truffle.api.utilities.CyclicAssumption;
-import org.truffleruby.stdlib.bigdecimal.RubyBigDecimal;
 import org.truffleruby.stdlib.digest.RubyDigest;
 
 @TruffleLanguage.Registration(
@@ -115,7 +122,7 @@ import org.truffleruby.stdlib.digest.RubyDigest;
         StandardTags.ReadVariableTag.class,
         StandardTags.WriteVariableTag.class,
 })
-public class RubyLanguage extends TruffleLanguage<RubyContext> {
+public final class RubyLanguage extends TruffleLanguage<RubyContext> {
 
     public static final String PLATFORM = String.format(
             "%s-%s%s",
@@ -138,12 +145,18 @@ public class RubyLanguage extends TruffleLanguage<RubyContext> {
             .createAssumption("single RubyContext per RubyLanguage instance");
     public final CyclicAssumption traceFuncUnusedAssumption = new CyclicAssumption("set_trace_func is not used");
 
+    private final ReentrantLock safepointLock = new ReentrantLock();
+    @CompilationFinal private Assumption safepointAssumption = Truffle
+            .getRuntime()
+            .createAssumption("SafepointManager");
+
     public final CoreMethodAssumptions coreMethodAssumptions;
     public final CoreStrings coreStrings;
     public final CoreSymbols coreSymbols;
     public final PrimitiveManager primitiveManager;
     public final RopeCache ropeCache;
     public final SymbolTable symbolTable;
+    public final FrozenStringLiterals frozenStringLiterals;
     @CompilationFinal public LanguageOptions options;
 
     @CompilationFinal private AllocationReporter allocationReporter;
@@ -156,47 +169,44 @@ public class RubyLanguage extends TruffleLanguage<RubyContext> {
     public final Shape moduleShape = createShape(RubyModule.class);
     public final Shape classShape = createShape(RubyClass.class);
 
-    // TODO (eregon, 25 Sep 2020): These Shapes should ideally be stored in the language instance,
-    // so different Engines/RubyLanguage instances can have different type profiles.
-    // However that requires passing the language instance around a lot which is inconvenient
-    // and does not seem worth it currently. Also these builtin types are rather unlikely to have
-    // instance variables.
-    public static final Shape arrayShape = createShape(RubyArray.class);
-    public static final Shape atomicReferenceShape = createShape(RubyAtomicReference.class);
-    public static final Shape bigDecimalShape = createShape(RubyBigDecimal.class);
-    public static final Shape bindingShape = createShape(RubyBinding.class);
-    public static final Shape byteArrayShape = createShape(RubyByteArray.class);
-    public static final Shape conditionVariableShape = createShape(RubyConditionVariable.class);
-    public static final Shape digestShape = createShape(RubyDigest.class);
-    public static final Shape encodingConverterShape = createShape(RubyEncodingConverter.class);
-    public static final Shape encodingShape = createShape(RubyEncoding.class);
-    public static final Shape exceptionShape = createShape(RubyException.class);
-    public static final Shape fiberShape = createShape(RubyFiber.class);
-    public static final Shape handleShape = createShape(RubyHandle.class);
-    public static final Shape hashShape = createShape(RubyHash.class);
-    public static final Shape intRangeShape = createShape(RubyIntRange.class);
-    public static final Shape ioShape = createShape(RubyIO.class);
-    public static final Shape longRangeShape = createShape(RubyLongRange.class);
-    public static final Shape matchDataShape = createShape(RubyMatchData.class);
-    public static final Shape methodShape = createShape(RubyMethod.class);
-    public static final Shape mutexShape = createShape(RubyMutex.class);
-    public static final Shape nameErrorShape = createShape(RubyNameError.class);
-    public static final Shape noMethodErrorShape = createShape(RubyNoMethodError.class);
-    public static final Shape objectRangeShape = createShape(RubyObjectRange.class);
-    public static final Shape procShape = createShape(RubyProc.class);
-    public static final Shape queueShape = createShape(RubyQueue.class);
-    public static final Shape randomizerShape = createShape(RubyRandomizer.class);
-    public static final Shape regexpShape = createShape(RubyRegexp.class);
-    public static final Shape sizedQueueShape = createShape(RubySizedQueue.class);
-    public static final Shape stringShape = createShape(RubyString.class);
-    public static final Shape systemCallErrorShape = createShape(RubySystemCallError.class);
-    public static final Shape threadBacktraceLocationShape = createShape(RubyBacktraceLocation.class);
-    public static final Shape threadShape = createShape(RubyThread.class);
-    public static final Shape timeShape = createShape(RubyTime.class);
-    public static final Shape tracePointShape = createShape(RubyTracePoint.class);
-    public static final Shape truffleFFIPointerShape = createShape(RubyPointer.class);
-    public static final Shape unboundMethodShape = createShape(RubyUnboundMethod.class);
-    public static final Shape weakMapShape = createShape(RubyWeakMap.class);
+    public final Shape arrayShape = createShape(RubyArray.class);
+    public final Shape atomicReferenceShape = createShape(RubyAtomicReference.class);
+    public final Shape bindingShape = createShape(RubyBinding.class);
+    public final Shape byteArrayShape = createShape(RubyByteArray.class);
+    public final Shape conditionVariableShape = createShape(RubyConditionVariable.class);
+    public final Shape digestShape = createShape(RubyDigest.class);
+    public final Shape encodingConverterShape = createShape(RubyEncodingConverter.class);
+    public final Shape encodingShape = createShape(RubyEncoding.class);
+    public final Shape exceptionShape = createShape(RubyException.class);
+    public final Shape fiberShape = createShape(RubyFiber.class);
+    public final Shape frozenErrorShape = createShape(RubyFrozenError.class);
+    public final Shape handleShape = createShape(RubyHandle.class);
+    public final Shape hashShape = createShape(RubyHash.class);
+    public final Shape intRangeShape = createShape(RubyIntRange.class);
+    public final Shape ioShape = createShape(RubyIO.class);
+    public final Shape longRangeShape = createShape(RubyLongRange.class);
+    public final Shape matchDataShape = createShape(RubyMatchData.class);
+    public final Shape methodShape = createShape(RubyMethod.class);
+    public final Shape mutexShape = createShape(RubyMutex.class);
+    public final Shape nameErrorShape = createShape(RubyNameError.class);
+    public final Shape noMethodErrorShape = createShape(RubyNoMethodError.class);
+    public final Shape objectRangeShape = createShape(RubyObjectRange.class);
+    public final Shape procShape = createShape(RubyProc.class);
+    public final Shape queueShape = createShape(RubyQueue.class);
+    public final Shape randomizerShape = createShape(RubyRandomizer.class);
+    public final Shape regexpShape = createShape(RubyRegexp.class);
+    public final Shape sizedQueueShape = createShape(RubySizedQueue.class);
+    public final Shape stringShape = createShape(RubyString.class);
+    public final Shape syntaxErrorShape = createShape(RubySyntaxError.class);
+    public final Shape systemCallErrorShape = createShape(RubySystemCallError.class);
+    public final Shape systemExitShape = createShape(RubySystemExit.class);
+    public final Shape threadBacktraceLocationShape = createShape(RubyBacktraceLocation.class);
+    public final Shape threadShape = createShape(RubyThread.class);
+    public final Shape timeShape = createShape(RubyTime.class);
+    public final Shape tracePointShape = createShape(RubyTracePoint.class);
+    public final Shape truffleFFIPointerShape = createShape(RubyPointer.class);
+    public final Shape unboundMethodShape = createShape(RubyUnboundMethod.class);
+    public final Shape weakMapShape = createShape(RubyWeakMap.class);
 
     public RubyLanguage() {
         coreMethodAssumptions = new CoreMethodAssumptions(this);
@@ -205,6 +215,7 @@ public class RubyLanguage extends TruffleLanguage<RubyContext> {
         primitiveManager = new PrimitiveManager();
         ropeCache = new RopeCache(coreSymbols);
         symbolTable = new SymbolTable(ropeCache, coreSymbols);
+        frozenStringLiterals = new FrozenStringLiterals(ropeCache);
     }
 
     @TruffleBoundary
@@ -225,6 +236,20 @@ public class RubyLanguage extends TruffleLanguage<RubyContext> {
     public void invalidateTracingAssumption() {
         tracingCyclicAssumption.invalidate();
         tracingAssumption = tracingCyclicAssumption.getAssumption();
+    }
+
+    public Assumption getSafepointAssumption() {
+        return safepointAssumption;
+    }
+
+    public void invalidateSafepointAssumption(String reason) {
+        safepointLock.lock();
+        safepointAssumption.invalidate(reason);
+    }
+
+    public void resetSafepointAssumption() {
+        safepointAssumption = Truffle.getRuntime().createAssumption("SafepointManager");
+        safepointLock.unlock();
     }
 
     @Override
@@ -280,6 +305,12 @@ public class RubyLanguage extends TruffleLanguage<RubyContext> {
 
         LOGGER.fine("patchContext()");
         Metrics.printTime("before-patch-context");
+        final LanguageOptions oldOptions = Objects.requireNonNull(this.options);
+        final LanguageOptions newOptions = new LanguageOptions(newEnv, newEnv.getOptions());
+        if (!LanguageOptions.areOptionsCompatibleOrLog(LOGGER, oldOptions, newOptions)) {
+            return false;
+        }
+
         boolean patched = context.patchContext(newEnv);
         Metrics.printTime("after-patch-context");
         return patched;
@@ -403,6 +434,14 @@ public class RubyLanguage extends TruffleLanguage<RubyContext> {
 
     public AllocationReporter getAllocationReporter() {
         return allocationReporter;
+    }
+
+    public ImmutableRubyString getFrozenStringLiteral(byte[] bytes, Encoding encoding, CodeRange codeRange) {
+        return frozenStringLiterals.getFrozenStringLiteral(bytes, encoding, codeRange);
+    }
+
+    public ImmutableRubyString getFrozenStringLiteral(Rope rope) {
+        return frozenStringLiterals.getFrozenStringLiteral(rope);
     }
 
     public long getNextObjectID() {

@@ -18,7 +18,6 @@ import org.jcodings.IntHolder;
 import org.jcodings.specific.USASCIIEncoding;
 import org.jcodings.specific.UTF8Encoding;
 import org.truffleruby.Layouts;
-import org.truffleruby.RubyLanguage;
 import org.truffleruby.builtins.CoreMethod;
 import org.truffleruby.builtins.CoreMethodArrayArgumentsNode;
 import org.truffleruby.builtins.CoreMethodNode;
@@ -28,10 +27,10 @@ import org.truffleruby.builtins.PrimitiveArrayArgumentsNode;
 import org.truffleruby.builtins.YieldingCoreMethodNode;
 import org.truffleruby.cext.CExtNodesFactory.CallCWithMutexNodeFactory;
 import org.truffleruby.cext.CExtNodesFactory.StringToNativeNodeGen;
+import org.truffleruby.collections.ConcurrentOperations;
 import org.truffleruby.core.CoreLibrary;
 import org.truffleruby.core.MarkingService.ExtensionCallStack;
 import org.truffleruby.core.MarkingServiceNodes;
-import org.truffleruby.core.array.ArrayHelpers;
 import org.truffleruby.core.array.ArrayToObjectArrayNode;
 import org.truffleruby.core.array.RubyArray;
 import org.truffleruby.core.encoding.RubyEncoding;
@@ -52,6 +51,7 @@ import org.truffleruby.core.numeric.FixnumOrBignumNode;
 import org.truffleruby.core.numeric.RubyBignum;
 import org.truffleruby.core.proc.RubyProc;
 import org.truffleruby.core.rope.CodeRange;
+import org.truffleruby.core.rope.LeafRope;
 import org.truffleruby.core.rope.NativeRope;
 import org.truffleruby.core.rope.Rope;
 import org.truffleruby.core.rope.RopeNodes;
@@ -66,6 +66,7 @@ import org.truffleruby.extra.ffi.RubyPointer;
 import org.truffleruby.interop.InteropNodes;
 import org.truffleruby.interop.ToJavaStringNode;
 import org.truffleruby.interop.TranslateInteropExceptionNode;
+import org.truffleruby.core.string.ImmutableRubyString;
 import org.truffleruby.language.LexicalScope;
 import org.truffleruby.language.NotProvided;
 import org.truffleruby.language.RubyContextNode;
@@ -73,6 +74,7 @@ import org.truffleruby.language.RubyDynamicObject;
 import org.truffleruby.language.RubyGuards;
 import org.truffleruby.language.RubyNode;
 import org.truffleruby.language.RubyRootNode;
+import org.truffleruby.language.SafepointManager;
 import org.truffleruby.language.Visibility;
 import org.truffleruby.language.arguments.RubyArguments;
 import org.truffleruby.language.backtrace.Backtrace;
@@ -82,6 +84,7 @@ import org.truffleruby.language.control.BreakException;
 import org.truffleruby.language.control.BreakID;
 import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.dispatch.DispatchNode;
+import org.truffleruby.language.library.RubyStringLibrary;
 import org.truffleruby.language.methods.DeclarationContext;
 import org.truffleruby.language.methods.InternalMethod;
 import org.truffleruby.language.objects.AllocationTracing;
@@ -111,7 +114,6 @@ import com.oracle.truffle.api.nodes.RootNode;
 import com.oracle.truffle.api.profiles.BranchProfile;
 import com.oracle.truffle.api.profiles.ConditionProfile;
 import com.oracle.truffle.api.source.SourceSection;
-
 
 @CoreModule("Truffle::CExt")
 public class CExtNodes {
@@ -358,7 +360,7 @@ public class CExtNodes {
                     }
                 }
             }
-            return ArrayHelpers.createArray(getContext(), bytes);
+            return createArray(bytes);
         }
 
 
@@ -455,17 +457,6 @@ public class CExtNodes {
 
     }
 
-    @CoreMethod(names = "rb_class_of", onSingleton = true, required = 1)
-    public abstract static class RBClassOfNode extends CoreMethodArrayArgumentsNode {
-
-        @Specialization
-        protected RubyClass rb_class_of(Object object,
-                @Cached MetaClassNode metaClassNode) {
-            return metaClassNode.execute(object);
-        }
-
-    }
-
     @CoreMethod(names = "rb_long2int", onSingleton = true, required = 1)
     public abstract static class Long2Int extends CoreMethodArrayArgumentsNode {
 
@@ -498,7 +489,7 @@ public class CExtNodes {
                 @Cached StringToNativeNode stringToNativeNode) {
             final NativeRope nativeRope = stringToNativeNode.executeToNative(string);
             nativeRope.clearCodeRange();
-            StringOperations.setRope(string, nativeRope);
+            string.setRope(nativeRope);
 
             return string;
         }
@@ -518,14 +509,15 @@ public class CExtNodes {
     @CoreMethod(names = "rb_enc_codepoint_len", onSingleton = true, required = 2)
     public abstract static class RbEncCodePointLenNode extends CoreMethodArrayArgumentsNode {
 
-        @Specialization
-        protected RubyArray rbEncCodePointLen(RubyString string, RubyEncoding encoding,
+        @Specialization(guards = "strings.isRubyString(string)")
+        protected RubyArray rbEncCodePointLen(Object string, RubyEncoding encoding,
+                @CachedLibrary(limit = "2") RubyStringLibrary strings,
                 @Cached RopeNodes.BytesNode bytesNode,
                 @Cached RopeNodes.CalculateCharacterLengthNode calculateCharacterLengthNode,
                 @Cached RopeNodes.CodeRangeNode codeRangeNode,
                 @Cached ConditionProfile sameEncodingProfile,
                 @Cached BranchProfile errorProfile) {
-            final Rope rope = string.rope;
+            final Rope rope = strings.getRope(string);
             final byte[] bytes = bytesNode.execute(rope);
             final CodeRange ropeCodeRange = codeRangeNode.execute(rope);
             final Encoding enc = encoding.encoding;
@@ -592,7 +584,7 @@ public class CExtNodes {
     public abstract static class RbStrCapacityNode extends CoreMethodArrayArgumentsNode {
 
         @Specialization
-        protected long capacity(RubyString string,
+        protected long capacity(Object string,
                 @Cached StringToNativeNode stringToNativeNode) {
             return stringToNativeNode.executeToNative(string).getCapacity();
         }
@@ -619,7 +611,7 @@ public class CExtNodes {
             }
 
             final NativeRope newNativeRope = nativeRope.withByteLength(newByteLength, newCharacterLength, newCodeRange);
-            StringOperations.setRope(string, newNativeRope);
+            string.setRope(newNativeRope);
 
             return string;
         }
@@ -644,7 +636,7 @@ public class CExtNodes {
                 // Like MRI's rb_str_resize()
                 newRope.clearCodeRange();
 
-                StringOperations.setRope(string, newRope);
+                string.setRope(newRope);
                 return string;
             }
         }
@@ -933,10 +925,10 @@ public class CExtNodes {
     public abstract static class RbSysErrFail extends CoreMethodArrayArgumentsNode {
 
         @Specialization
-        protected Object rbSysErrFail(int errno, RubyString message,
+        protected Object rbSysErrFail(int errno, Object string,
                 @Cached ErrnoErrorNode errnoErrorNode) {
             final Backtrace backtrace = getContext().getCallStack().getBacktrace(this);
-            throw new RaiseException(getContext(), errnoErrorNode.execute(errno, message, backtrace));
+            throw new RaiseException(getContext(), errnoErrorNode.execute(errno, string, backtrace));
         }
 
     }
@@ -954,9 +946,10 @@ public class CExtNodes {
     @Primitive(name = "string_pointer_size")
     public abstract static class StringPointerSizeNode extends PrimitiveArrayArgumentsNode {
 
-        @Specialization
-        protected int size(RubyString string) {
-            final Rope rope = string.rope;
+        @Specialization(guards = "strings.isRubyString(string)")
+        protected int size(Object string,
+                @CachedLibrary(limit = "2") RubyStringLibrary strings) {
+            final Rope rope = strings.getRope(string);
             final int byteLength = rope.byteLength();
             int i = 0;
             for (; i < byteLength; i++) {
@@ -975,7 +968,7 @@ public class CExtNodes {
             return StringToNativeNodeGen.create();
         }
 
-        public abstract NativeRope executeToNative(RubyString string);
+        public abstract NativeRope executeToNative(Object string);
 
         @Specialization
         protected NativeRope toNative(RubyString string,
@@ -996,10 +989,24 @@ public class CExtNodes {
                         currentRope.getEncoding(),
                         characterLengthNode.execute(currentRope),
                         codeRangeNode.execute(currentRope));
-                StringOperations.setRope(string, nativeRope);
+                string.setRope(nativeRope);
             }
 
             return nativeRope;
+        }
+
+        @TruffleBoundary
+        @Specialization
+        protected NativeRope toNativeImmutable(ImmutableRubyString string) {
+            return ConcurrentOperations.getOrCompute(getContext().getImmutableNativeRopes(), string, s -> {
+                final LeafRope currentRope = s.rope;
+                return new NativeRope(
+                        getContext().getFinalizationService(),
+                        currentRope.getBytes(),
+                        currentRope.getEncoding(),
+                        currentRope.characterLength(),
+                        currentRope.getCodeRange());
+            });
         }
 
     }
@@ -1008,7 +1015,7 @@ public class CExtNodes {
     public abstract static class StringPointerToNativeNode extends PrimitiveArrayArgumentsNode {
 
         @Specialization
-        protected long toNative(RubyString string,
+        protected long toNative(Object string,
                 @Cached StringToNativeNode stringToNativeNode) {
             final NativeRope nativeRope = stringToNativeNode.executeToNative(string);
 
@@ -1021,13 +1028,13 @@ public class CExtNodes {
     public abstract static class StringToPointerNode extends CoreMethodArrayArgumentsNode {
 
         @Specialization
-        protected RubyPointer toNative(RubyString string,
+        protected RubyPointer toNative(Object string,
                 @Cached StringToNativeNode stringToNativeNode) {
             final NativeRope nativeRope = stringToNativeNode.executeToNative(string);
 
             final RubyPointer instance = new RubyPointer(
                     coreLibrary().truffleFFIPointerClass,
-                    RubyLanguage.truffleFFIPointerShape,
+                    getLanguage().truffleFFIPointerShape,
                     nativeRope.getNativePointer());
             AllocationTracing.trace(instance, this);
             return instance;
@@ -1043,17 +1050,24 @@ public class CExtNodes {
             return string.rope instanceof NativeRope;
         }
 
+        @TruffleBoundary
+        @Specialization
+        protected boolean isNative(ImmutableRubyString string) {
+            return getContext().getImmutableNativeRopes().containsKey(string);
+        }
+
     }
 
     @Primitive(name = "string_pointer_read", lowerFixnum = 1)
     public abstract static class StringPointerReadNode extends PrimitiveArrayArgumentsNode {
 
-        @Specialization
-        protected Object read(RubyString string, int index,
+        @Specialization(guards = "libString.isRubyString(string)")
+        protected Object read(Object string, int index,
+                @CachedLibrary(limit = "2") RubyStringLibrary libString,
                 @Cached ConditionProfile nativeRopeProfile,
                 @Cached ConditionProfile inBoundsProfile,
                 @Cached RopeNodes.GetByteNode getByteNode) {
-            final Rope rope = string.rope;
+            final Rope rope = libString.getRope(string);
 
             if (nativeRopeProfile.profile(rope instanceof NativeRope) ||
                     inBoundsProfile.profile(index < rope.byteLength())) {
@@ -1076,7 +1090,7 @@ public class CExtNodes {
 
             final Rope newRope = setByteNode.executeSetByte(rope, index, value);
             if (newRopeProfile.profile(newRope != rope)) {
-                StringOperations.setRope(string, newRope);
+                string.setRope(newRope);
             }
 
             return value;
@@ -1117,11 +1131,12 @@ public class CExtNodes {
                 System.err.printf("Printing %d values%n", objects.length);
             }
 
+            final RubyStringLibrary libString = RubyStringLibrary.getUncached();
             for (Object object : objects) {
                 final String representation;
 
-                if (RubyGuards.isRubyString(object)) {
-                    final Rope rope = ((RubyString) object).rope;
+                if (libString.isRubyString(object)) {
+                    final Rope rope = libString.getRope(object);
                     final byte[] bytes = rope.getBytes();
                     final StringBuilder builder = new StringBuilder();
 
@@ -1134,7 +1149,8 @@ public class CExtNodes {
 
                     representation = RopeOperations.decodeRope(rope) + " (" + builder.toString() + ")";
                 } else if (RubyGuards.isRubyValue(object)) {
-                    representation = object.toString() + " (" + callToS(object).getJavaString() + ")";
+                    representation = object.toString() + " (" +
+                            RubyStringLibrary.getUncached().getJavaString(callToS(object)) + ")";
                 } else {
                     representation = object.toString();
                 }
@@ -1144,13 +1160,13 @@ public class CExtNodes {
             return nil;
         }
 
-        private RubyString callToS(Object object) {
+        private Object callToS(Object object) {
             if (toSCall == null) {
                 CompilerDirectives.transferToInterpreterAndInvalidate();
                 toSCall = insert(DispatchNode.create());
             }
 
-            return (RubyString) toSCall.call(object, "to_s");
+            return toSCall.call(object, "to_s");
         }
 
     }
@@ -1195,11 +1211,12 @@ public class CExtNodes {
     @CoreMethod(names = "rb_tr_enc_mbc_case_fold", onSingleton = true, required = 5, lowerFixnum = 2)
     public abstract static class RbTrMbcCaseFoldNode extends CoreMethodArrayArgumentsNode {
 
-        @Specialization(limit = "getCacheLimit()")
-        protected Object rbTrEncMbcCaseFold(RubyEncoding enc, int flags, RubyString string, Object write_p, Object p,
+        @Specialization(guards = "strings.isRubyString(string)", limit = "getCacheLimit()")
+        protected Object rbTrEncMbcCaseFold(RubyEncoding enc, int flags, Object string, Object write_p, Object p,
+                @CachedLibrary(limit = "2") RubyStringLibrary strings,
                 @CachedLibrary("write_p") InteropLibrary receivers,
                 @Cached TranslateInteropExceptionNode translateInteropExceptionNode) {
-            final byte[] bytes = string.rope.getBytes();
+            final byte[] bytes = strings.getRope(string).getBytes();
             final byte[] to = new byte[bytes.length];
             final IntHolder intHolder = new IntHolder();
             intHolder.value = 0;
@@ -1211,7 +1228,6 @@ public class CExtNodes {
                 System.arraycopy(to, 0, result, 0, resultLength);
             }
             return StringOperations.createString(
-                    getContext(),
                     this,
                     RopeOperations.create(result, USASCIIEncoding.INSTANCE, CodeRange.CR_UNKNOWN));
         }
@@ -1235,7 +1251,6 @@ public class CExtNodes {
                 System.arraycopy(buf, 0, result, 0, resultLength);
             }
             return StringOperations.createString(
-                    getContext(),
                     this,
                     RopeOperations.create(result, USASCIIEncoding.INSTANCE, CodeRange.CR_UNKNOWN));
         }
@@ -1265,12 +1280,13 @@ public class CExtNodes {
     @CoreMethod(names = "rb_enc_mbclen", onSingleton = true, required = 4, lowerFixnum = { 3, 4 })
     public abstract static class RbEncMbLenNode extends CoreMethodArrayArgumentsNode {
 
-        @Specialization
-        protected Object rbEncMbLen(RubyEncoding enc, RubyString str, int p, int e,
+        @Specialization(guards = "strings.isRubyString(string)")
+        protected Object rbEncMbLen(RubyEncoding enc, Object string, int p, int e,
+                @CachedLibrary(limit = "2") RubyStringLibrary strings,
                 @Cached RopeNodes.CodeRangeNode codeRangeNode,
                 @Cached ConditionProfile sameEncodingProfile) {
             final Encoding encoding = enc.encoding;
-            final Rope rope = str.rope;
+            final Rope rope = strings.getRope(string);
             final Encoding ropeEncoding = rope.getEncoding();
 
             return StringSupport.characterLength(
@@ -1278,7 +1294,7 @@ public class CExtNodes {
                     sameEncodingProfile.profile(encoding == ropeEncoding)
                             ? codeRangeNode.execute(rope)
                             : CodeRange.CR_UNKNOWN,
-                    str.rope.getBytes(),
+                    strings.getRope(string).getBytes(),
                     p,
                     e,
                     true);
@@ -1290,10 +1306,11 @@ public class CExtNodes {
     public abstract static class RbEncLeftCharHeadNode extends CoreMethodArrayArgumentsNode {
 
         @TruffleBoundary
-        @Specialization
-        protected Object rbEncLeftCharHead(RubyEncoding enc, RubyString str, int start, int p, int end) {
+        @Specialization(guards = "strings.isRubyString(string)")
+        protected Object rbEncLeftCharHead(RubyEncoding enc, Object string, int start, int p, int end,
+                @CachedLibrary(limit = "2") RubyStringLibrary strings) {
             return enc.encoding.leftAdjustCharHead(
-                    str.rope.getBytes(),
+                    strings.getRope(string).getBytes(),
                     start,
                     p,
                     end);
@@ -1303,13 +1320,12 @@ public class CExtNodes {
 
     @CoreMethod(names = "rb_enc_mbc_to_codepoint", onSingleton = true, required = 3, lowerFixnum = 3)
     public abstract static class RbEncMbcToCodepointNode extends CoreMethodArrayArgumentsNode {
-
-        @Specialization
-        protected int rbEncMbcToCodepoint(RubyEncoding enc, RubyString str, int end) {
-            final Rope rope = str.rope;
-            return enc.encoding.mbcToCode(rope.getBytes(), 0, end);
+        @Specialization(guards = "strings.isRubyString(string)")
+        protected int rbEncMbcToCodepoint(RubyEncoding enc, Object string, int end,
+                @CachedLibrary(limit = "2") RubyStringLibrary strings) {
+            final Rope rope = strings.getRope(string);
+            return StringSupport.mbcToCode(enc.encoding, rope, 0, end);
         }
-
     }
 
     @CoreMethod(names = "rb_enc_precise_mbclen", onSingleton = true, required = 4, lowerFixnum = { 3, 4 })
@@ -1317,12 +1333,13 @@ public class CExtNodes {
 
         @Child private RopeNodes.CodeRangeNode codeRangeNode;
 
-        @Specialization
-        protected int rbEncPreciseMbclen(RubyEncoding enc, RubyString str, int p, int end,
+        @Specialization(guards = "strings.isRubyString(string)")
+        protected int rbEncPreciseMbclen(RubyEncoding enc, Object string, int p, int end,
+                @CachedLibrary(limit = "2") RubyStringLibrary strings,
                 @Cached RopeNodes.CalculateCharacterLengthNode calculateCharacterLengthNode,
                 @Cached ConditionProfile sameEncodingProfile) {
             final Encoding encoding = enc.encoding;
-            final Rope rope = str.rope;
+            final Rope rope = strings.getRope(string);
             final CodeRange cr;
             if (sameEncodingProfile.profile(encoding == rope.getEncoding())) {
                 cr = codeRange(rope);
@@ -1488,7 +1505,7 @@ public class CExtNodes {
 
         @Specialization
         protected Object checkInts() {
-            getContext().getSafepointManager().poll(this);
+            SafepointManager.poll(getLanguage(), this);
             return nil;
         }
     }
@@ -1540,10 +1557,10 @@ public class CExtNodes {
 
     @CoreMethod(names = "rb_check_symbol_cstr", onSingleton = true, required = 1)
     public abstract static class RbCheckSymbolCStrNode extends CoreMethodArrayArgumentsNode {
-
-        @Specialization
-        protected Object checkSymbolCStr(RubyString str) {
-            final RubySymbol sym = getLanguage().symbolTable.getSymbolIfExists(str.rope);
+        @Specialization(guards = "strings.isRubyString(string)")
+        protected Object checkSymbolCStr(Object string,
+                @CachedLibrary(limit = "2") RubyStringLibrary strings) {
+            final RubySymbol sym = getLanguage().symbolTable.getSymbolIfExists(strings.getRope(string));
             return sym == null ? nil : sym;
         }
     }

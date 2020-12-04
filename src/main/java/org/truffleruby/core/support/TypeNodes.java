@@ -21,7 +21,6 @@ import org.truffleruby.builtins.Primitive;
 import org.truffleruby.builtins.PrimitiveArrayArgumentsNode;
 import org.truffleruby.builtins.PrimitiveNode;
 import org.truffleruby.core.array.ArrayGuards;
-import org.truffleruby.core.array.ArrayHelpers;
 import org.truffleruby.core.array.RubyArray;
 import org.truffleruby.core.array.library.ArrayStoreLibrary;
 import org.truffleruby.core.basicobject.BasicObjectNodes.ReferenceEqualNode;
@@ -38,6 +37,7 @@ import org.truffleruby.core.string.RubyString;
 import org.truffleruby.core.string.StringNodes;
 import org.truffleruby.core.string.StringUtils;
 import org.truffleruby.core.symbol.RubySymbol;
+import org.truffleruby.core.string.ImmutableRubyString;
 import org.truffleruby.language.Nil;
 import org.truffleruby.language.NotProvided;
 import org.truffleruby.language.RubyDynamicObject;
@@ -46,9 +46,9 @@ import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.library.RubyLibrary;
 import org.truffleruby.language.objects.IsANode;
 import org.truffleruby.language.objects.LogicalClassNode;
+import org.truffleruby.language.objects.MetaClassNode;
 import org.truffleruby.language.objects.WriteObjectFieldNode;
 
-import com.oracle.truffle.api.CompilerDirectives;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.Fallback;
@@ -96,7 +96,18 @@ public abstract class TypeNodes {
 
         @Specialization
         protected RubyClass objectClass(Object object) {
-            return classNode.executeLogicalClass(object);
+            return classNode.execute(object);
+        }
+
+    }
+
+    @Primitive(name = "class_of")
+    public abstract static class ClassOfNode extends PrimitiveArrayArgumentsNode {
+
+        @Specialization
+        protected RubyClass classOf(Object object,
+                @Cached MetaClassNode metaClassNode) {
+            return metaClassNode.execute(object);
         }
 
     }
@@ -151,37 +162,42 @@ public abstract class TypeNodes {
 
         @Specialization
         protected RubyArray instanceVariables(int object) {
-            return ArrayHelpers.createEmptyArray(getContext());
+            return createEmptyArray();
         }
 
         @Specialization
         protected RubyArray instanceVariables(long object) {
-            return ArrayHelpers.createEmptyArray(getContext());
+            return createEmptyArray();
         }
 
         @Specialization
         protected RubyArray instanceVariables(double object) {
-            return ArrayHelpers.createEmptyArray(getContext());
+            return createEmptyArray();
         }
 
         @Specialization
         protected RubyArray instanceVariables(boolean object) {
-            return ArrayHelpers.createEmptyArray(getContext());
+            return createEmptyArray();
         }
 
         @Specialization
         protected RubyArray instanceVariablesNil(Nil object) {
-            return ArrayHelpers.createEmptyArray(getContext());
+            return createEmptyArray();
         }
 
         @Specialization
         protected RubyArray instanceVariablesSymbol(RubySymbol object) {
-            return ArrayHelpers.createEmptyArray(getContext());
+            return createEmptyArray();
+        }
+
+        @Specialization
+        protected RubyArray instanceVariablesImmutableString(ImmutableRubyString object) {
+            return createEmptyArray();
         }
 
         @Specialization(guards = "isForeignObject(object)")
         protected RubyArray instanceVariablesForeign(Object object) {
-            return ArrayHelpers.createEmptyArray(getContext());
+            return createEmptyArray();
         }
 
     }
@@ -299,29 +315,6 @@ public abstract class TypeNodes {
         protected RubyString toS(Object obj,
                 @Cached ToSNode kernelToSNode) {
             return kernelToSNode.executeToS(obj);
-        }
-
-    }
-
-    @Primitive(name = "infect")
-    public static abstract class InfectNode extends PrimitiveArrayArgumentsNode {
-
-        @Child private RubyLibrary rubyLibraryTaint;
-
-        @Specialization(limit = "getRubyLibraryCacheLimit()")
-        protected Object infect(Object host, Object source,
-                @CachedLibrary("source") RubyLibrary rubyLibrary) {
-            if (rubyLibrary.isTainted(source)) {
-                // This lazy node allocation effectively gives us a branch profile
-
-                if (rubyLibraryTaint == null) {
-                    CompilerDirectives.transferToInterpreterAndInvalidate();
-                    rubyLibraryTaint = insert(RubyLibrary.getFactory().createDispatched(getRubyLibraryCacheLimit()));
-                }
-                rubyLibraryTaint.taint(host);
-            }
-
-            return host;
         }
 
     }

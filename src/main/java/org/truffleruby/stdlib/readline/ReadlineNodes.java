@@ -20,6 +20,7 @@ import org.graalvm.shadowed.org.jline.reader.ParsedLine;
 import org.graalvm.shadowed.org.jline.reader.UserInterruptException;
 import org.jcodings.specific.UTF8Encoding;
 import org.truffleruby.RubyContext;
+import org.truffleruby.RubyLanguage;
 import org.truffleruby.builtins.CoreMethod;
 import org.truffleruby.builtins.CoreMethodArrayArgumentsNode;
 import org.truffleruby.builtins.CoreMethodNode;
@@ -43,13 +44,13 @@ import org.truffleruby.core.thread.ThreadManager.BlockingAction;
 import org.truffleruby.interop.ToJavaStringNode;
 import org.truffleruby.interop.ToJavaStringWithDefaultNodeGen;
 import org.truffleruby.language.RubyNode;
-import org.truffleruby.language.library.RubyLibrary;
 
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.dsl.CreateCast;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.library.CachedLibrary;
+import org.truffleruby.language.library.RubyStringLibrary;
 
 @CoreModule("Truffle::Readline")
 public abstract class ReadlineNodes {
@@ -78,9 +79,10 @@ public abstract class ReadlineNodes {
         }
 
         @TruffleBoundary
-        @Specialization
-        protected RubyString setBasicWordBreakCharacters(RubyString characters) {
-            final String delimiters = characters.getJavaString();
+        @Specialization(guards = "strings.isRubyString(characters)")
+        protected Object setBasicWordBreakCharacters(Object characters,
+                @CachedLibrary(limit = "2") RubyStringLibrary strings) {
+            final String delimiters = strings.getJavaString(characters);
             getContext().getConsoleHolder().getParser().setDelimiters(delimiters);
             return characters;
         }
@@ -93,7 +95,7 @@ public abstract class ReadlineNodes {
         @TruffleBoundary
         @Specialization
         protected RubyProc setCompletionProc(RubyProc proc) {
-            final ProcCompleter completer = new ProcCompleter(getContext(), proc);
+            final ProcCompleter completer = new ProcCompleter(getContext(), getLanguage(), proc);
             getContext().getConsoleHolder().setCompleter(completer);
             return proc;
         }
@@ -112,7 +114,7 @@ public abstract class ReadlineNodes {
                     readline.getTerminal().getWidth()
             };
 
-            return ArrayHelpers.createArray(getContext(), store);
+            return ArrayHelpers.createArray(getContext(), getLanguage(), store);
         }
 
     }
@@ -136,8 +138,7 @@ public abstract class ReadlineNodes {
 
         @TruffleBoundary
         @Specialization
-        protected Object readline(String prompt, boolean addToHistory,
-                @CachedLibrary(limit = "getRubyLibraryCacheLimit()") RubyLibrary rubyLibrary) {
+        protected Object readline(String prompt, boolean addToHistory) {
             final LineReader readline = getContext().getConsoleHolder().getReadline();
 
             // Use a Memo as readLine() can return null on Ctrl+D and we should not retry
@@ -164,12 +165,10 @@ public abstract class ReadlineNodes {
                     readline.getHistory().add(value);
                 }
 
-                final RubyString ret = makeStringNode.executeMake(
+                return makeStringNode.executeMake(
                         value,
                         getContext().getEncodingManager().getDefaultExternalEncoding(),
                         CodeRange.CR_UNKNOWN);
-                rubyLibrary.taint(ret);
-                return ret;
             }
         }
 
@@ -224,14 +223,11 @@ public abstract class ReadlineNodes {
 
         @TruffleBoundary
         @Specialization
-        protected Object lineBuffer(
-                @CachedLibrary(limit = "getRubyLibraryCacheLimit()") RubyLibrary rubyLibrary) {
+        protected Object lineBuffer() {
             final Buffer buffer = getContext().getConsoleHolder().getReadline().getBuffer();
 
-            final RubyString ret = makeStringNode
+            return makeStringNode
                     .executeMake(buffer.toString(), getLocaleEncoding(), CodeRange.CR_UNKNOWN);
-            rubyLibrary.taint(ret);
-            return ret;
         }
 
     }
@@ -276,10 +272,12 @@ public abstract class ReadlineNodes {
     private static class ProcCompleter implements Completer {
 
         private final RubyContext context;
+        private final RubyLanguage language;
         private final RubyProc proc;
 
-        public ProcCompleter(RubyContext context, RubyProc proc) {
+        public ProcCompleter(RubyContext context, RubyLanguage language, RubyProc proc) {
             this.context = context;
+            this.language = language;
             this.proc = proc;
         }
 
@@ -290,10 +288,10 @@ public abstract class ReadlineNodes {
             boolean complete = lineReader.getBuffer().cursor() == lineReader.getBuffer().length();
 
             RubyString string = StringOperations
-                    .createString(context, StringOperations.encodeRope(buffer, UTF8Encoding.INSTANCE));
+                    .createString(context, language, StringOperations.encodeRope(buffer, UTF8Encoding.INSTANCE));
             RubyArray completions = (RubyArray) context.send(proc, "call", string);
             for (Object element : ArrayOperations.toIterable(completions)) {
-                final String completion = ((RubyString) element).getJavaString();
+                final String completion = RubyStringLibrary.getUncached().getJavaString(element);
                 candidates.add(new Candidate(completion + after, completion, null, null, null, null, complete));
             }
         }

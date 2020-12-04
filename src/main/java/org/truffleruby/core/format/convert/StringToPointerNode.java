@@ -18,16 +18,15 @@ import com.oracle.truffle.api.library.CachedLibrary;
 import org.truffleruby.cext.CExtNodes;
 import org.truffleruby.core.format.FormatFrameDescriptor;
 import org.truffleruby.core.format.FormatNode;
-import org.truffleruby.core.string.RubyString;
 import org.truffleruby.extra.ffi.Pointer;
 import org.truffleruby.language.Nil;
-import org.truffleruby.language.library.RubyLibrary;
 
 import com.oracle.truffle.api.dsl.Cached;
 import com.oracle.truffle.api.dsl.NodeChild;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.frame.FrameSlotTypeException;
 import com.oracle.truffle.api.frame.VirtualFrame;
+import org.truffleruby.language.library.RubyStringLibrary;
 
 @NodeChild("value")
 public abstract class StringToPointerNode extends FormatNode {
@@ -38,16 +37,14 @@ public abstract class StringToPointerNode extends FormatNode {
     }
 
     @SuppressWarnings("unchecked")
-    @Specialization(limit = "getRubyLibraryCacheLimit()")
-    protected long toPointer(VirtualFrame frame, RubyString string,
+    @Specialization(guards = "strings.isRubyString(string)")
+    protected long toPointer(VirtualFrame frame, Object string,
             @Cached CExtNodes.StringToNativeNode stringToNativeNode,
-            @CachedLibrary("string") RubyLibrary rubyLibrary) {
-        rubyLibrary.taint(string);
+            @CachedLibrary(limit = "2") RubyStringLibrary strings) {
 
         final Pointer pointer = stringToNativeNode.executeToNative(string).getNativePointer();
 
         List<Pointer> associated;
-
         try {
             associated = (List<Pointer>) frame.getObject(FormatFrameDescriptor.ASSOCIATED_SLOT);
         } catch (FrameSlotTypeException e) {

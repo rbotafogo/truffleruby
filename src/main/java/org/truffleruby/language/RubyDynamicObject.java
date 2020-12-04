@@ -19,7 +19,6 @@ import org.truffleruby.core.cast.IntegerCastNode;
 import org.truffleruby.core.cast.LongCastNode;
 import org.truffleruby.core.kernel.KernelNodes;
 import org.truffleruby.core.klass.RubyClass;
-import org.truffleruby.core.string.RubyString;
 import org.truffleruby.core.string.StringUtils;
 import org.truffleruby.interop.ForeignToRubyArgumentsNode;
 import org.truffleruby.interop.ForeignToRubyNode;
@@ -28,6 +27,7 @@ import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.dispatch.DispatchNode;
 import org.truffleruby.language.dispatch.InternalRespondToNode;
 import org.truffleruby.language.library.RubyLibrary;
+import org.truffleruby.language.library.RubyStringLibrary;
 import org.truffleruby.language.objects.LogicalClassNode;
 import org.truffleruby.language.objects.WriteObjectFieldNode;
 
@@ -105,45 +105,6 @@ public abstract class RubyDynamicObject extends DynamicObject {
             @CachedLibrary("this") DynamicObjectLibrary readFrozenNode) {
         return (boolean) readFrozenNode.getOrDefault(this, Layouts.FROZEN_IDENTIFIER, false);
     }
-
-    @ExportMessage
-    public boolean isTainted(
-            @CachedLibrary("this") DynamicObjectLibrary readTaintedNode) {
-        return (boolean) readTaintedNode.getOrDefault(this, Layouts.TAINTED_IDENTIFIER, false);
-    }
-
-    @ExportMessage
-    public void taint(
-            @CachedLibrary("this") RubyLibrary rubyLibrary,
-            @Exclusive @Cached WriteObjectFieldNode writeTaintNode,
-            @Exclusive @Cached BranchProfile errorProfile,
-            @CachedContext(RubyLanguage.class) RubyContext context) {
-
-        if (!rubyLibrary.isTainted(this) && rubyLibrary.isFrozen(this)) {
-            errorProfile.enter();
-            throw new RaiseException(context, context.getCoreExceptions().frozenError(this, getNode(rubyLibrary)));
-        }
-
-        writeTaintNode.execute(this, Layouts.TAINTED_IDENTIFIER, true);
-    }
-
-    @ExportMessage
-    public void untaint(
-            @CachedLibrary("this") RubyLibrary rubyLibrary,
-            @Exclusive @Cached WriteObjectFieldNode writeTaintNode,
-            @CachedContext(RubyLanguage.class) RubyContext context,
-            @Exclusive @Cached BranchProfile errorProfile) {
-        if (!rubyLibrary.isTainted(this)) {
-            return;
-        }
-
-        if (rubyLibrary.isFrozen(this)) {
-            errorProfile.enter();
-            throw new RaiseException(context, context.getCoreExceptions().frozenError(this, getNode(rubyLibrary)));
-        }
-
-        writeTaintNode.execute(this, Layouts.TAINTED_IDENTIFIER, false);
-    }
     // endregion
 
     // region InteropLibrary messages
@@ -158,13 +119,14 @@ public abstract class RubyDynamicObject extends DynamicObject {
     }
 
     @ExportMessage
-    public RubyString toDisplayString(boolean allowSideEffects,
+    public Object toDisplayString(boolean allowSideEffects,
             @Exclusive @Cached DispatchNode dispatchNode,
+            @CachedLibrary(limit = "2") RubyStringLibrary libString,
             @Cached KernelNodes.ToSNode kernelToSNode) {
         if (allowSideEffects) {
             Object inspect = dispatchNode.call(this, "inspect");
-            if (inspect instanceof RubyString) {
-                return (RubyString) inspect;
+            if (libString.isRubyString(inspect)) {
+                return inspect;
             } else {
                 return kernelToSNode.executeToS(this);
             }
@@ -202,7 +164,7 @@ public abstract class RubyDynamicObject extends DynamicObject {
     @ExportMessage
     public RubyClass getMetaObject(
             @Cached LogicalClassNode classNode) {
-        return classNode.executeLogicalClass(this);
+        return classNode.execute(this);
     }
     // endregion
 

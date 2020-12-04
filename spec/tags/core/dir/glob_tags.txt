@@ -1,1 +1,1 @@
-fails:Dir.glob splits the string on \0 if there is only one string given and warns
+fails:Dir.glob recursively matches files and directories in nested dot subdirectory with 'nested/**/*' from the current directory and option File::FNM_DOTMATCH

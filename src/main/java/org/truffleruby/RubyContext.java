@@ -17,13 +17,17 @@ import java.util.Collections;
 import java.util.Objects;
 import java.util.Map;
 import java.util.WeakHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 
 import com.oracle.truffle.api.CompilerAsserts;
 import com.oracle.truffle.api.CompilerDirectives;
+import com.oracle.truffle.api.RootCallTarget;
 import com.oracle.truffle.api.nodes.EncapsulatingNodeReference;
 import com.oracle.truffle.api.nodes.Node;
+import com.oracle.truffle.api.utilities.AssumedValue;
+import org.graalvm.collections.Pair;
 import org.graalvm.options.OptionDescriptor;
 import org.joni.Regex;
 import org.truffleruby.cext.ValueWrapperManager;
@@ -43,20 +47,21 @@ import org.truffleruby.core.inlined.CoreMethods;
 import org.truffleruby.core.kernel.AtExitManager;
 import org.truffleruby.core.kernel.TraceManager;
 import org.truffleruby.core.module.ModuleOperations;
+import org.truffleruby.core.module.RubyModule;
 import org.truffleruby.core.objectspace.ObjectSpaceManager;
 import org.truffleruby.core.proc.ProcOperations;
 import org.truffleruby.core.proc.RubyProc;
 import org.truffleruby.core.regexp.RegexpCacheKey;
+import org.truffleruby.core.rope.NativeRope;
 import org.truffleruby.core.rope.PathToRopeCache;
-import org.truffleruby.core.rope.Rope;
-import org.truffleruby.core.string.FrozenStringLiterals;
-import org.truffleruby.core.string.RubyString;
+import org.truffleruby.core.symbol.RubySymbol;
 import org.truffleruby.core.thread.ThreadManager;
 import org.truffleruby.core.time.GetTimeZoneNode;
 import org.truffleruby.debug.MetricsProfiler;
 import org.truffleruby.extra.ffi.Pointer;
 import org.truffleruby.interop.InteropManager;
 import org.truffleruby.language.CallStackManager;
+import org.truffleruby.core.string.ImmutableRubyString;
 import org.truffleruby.language.LexicalScope;
 import org.truffleruby.language.RubyBaseNode;
 import org.truffleruby.language.SafepointManager;
@@ -66,6 +71,7 @@ import org.truffleruby.language.control.RaiseException;
 import org.truffleruby.language.loader.CodeLoader;
 import org.truffleruby.language.loader.FeatureLoader;
 import org.truffleruby.language.methods.InternalMethod;
+import org.truffleruby.language.objects.MetaClassNode;
 import org.truffleruby.language.objects.shared.SharedObjects;
 import org.truffleruby.options.LanguageOptions;
 import org.truffleruby.options.Options;
@@ -76,6 +82,7 @@ import org.truffleruby.shared.Metrics;
 import org.truffleruby.shared.TruffleRuby;
 import org.truffleruby.shared.options.OptionsCatalog;
 import org.truffleruby.shared.options.RubyOptionTypes;
+import org.truffleruby.shared.options.Verbosity;
 import org.truffleruby.stdlib.CoverageManager;
 import org.truffleruby.stdlib.readline.ConsoleHolder;
 
@@ -100,10 +107,10 @@ public class RubyContext {
     @CompilationFinal private TruffleFile rubyHomeTruffleFile;
     @CompilationFinal private boolean hadHome;
 
-    private final SafepointManager safepointManager = new SafepointManager(this);
+    private final SafepointManager safepointManager;
     private final InteropManager interopManager = new InteropManager(this);
     private final CodeLoader codeLoader = new CodeLoader(this);
-    private final FeatureLoader featureLoader = new FeatureLoader(this);
+    private final FeatureLoader featureLoader;
     private final TraceManager traceManager;
     private final ReferenceProcessor referenceProcessor;
     private final FinalizationService finalizationService;
@@ -112,15 +119,17 @@ public class RubyContext {
     private final SharedObjects sharedObjects = new SharedObjects(this);
     private final AtExitManager atExitManager = new AtExitManager(this);
     private final CallStackManager callStack = new CallStackManager(this);
-    private final FrozenStringLiterals frozenStringLiterals = new FrozenStringLiterals(this);
     private final CoreExceptions coreExceptions;
-    private final EncodingManager encodingManager = new EncodingManager(this);
+    private final EncodingManager encodingManager;
     private final MetricsProfiler metricsProfiler = new MetricsProfiler(this);
     private final WeakValueCache<RegexpCacheKey, Regex> regexpCache = new WeakValueCache<>();
     private final PreInitializationManager preInitializationManager;
     private final NativeConfiguration nativeConfiguration;
     private final ValueWrapperManager valueWrapperManager;
     private final Map<Source, Integer> sourceLineOffsets = Collections.synchronizedMap(new WeakHashMap<>());
+    /** (Symbol, refinements) -> Proc for Symbol#to_proc */
+    public final Map<Pair<RubySymbol, Map<RubyModule, RubyModule[]>>, RootCallTarget> cachedSymbolToProcTargetsWithRefinements = new ConcurrentHashMap<>();
+    private final Map<ImmutableRubyString, NativeRope> immutableNativeRopes = new ConcurrentHashMap<>();
 
     @CompilationFinal private SecureRandom random;
     private final Hashing hashing;
@@ -142,6 +151,9 @@ public class RubyContext {
     @CompilationFinal private boolean preInitializing;
     private boolean initialized;
     private volatile boolean finalizing;
+
+    private final AssumedValue<Boolean> warningCategoryDeprecated;
+    private final AssumedValue<Boolean> warningCategoryExperimental;
 
     private static boolean preInitializeContexts = TruffleRuby.PRE_INITIALIZE_CONTEXTS;
 
@@ -165,8 +177,14 @@ public class RubyContext {
 
         options = createOptions(env, language.options);
 
-        coreExceptions = new CoreExceptions(this, language);
+        warningCategoryDeprecated = new AssumedValue<>(options.VERBOSITY == Verbosity.TRUE);
+        warningCategoryExperimental = new AssumedValue<>(options.VERBOSITY != Verbosity.NIL);
 
+        safepointManager = new SafepointManager(this, language);
+        coreExceptions = new CoreExceptions(this, language);
+        encodingManager = new EncodingManager(this, language);
+
+        featureLoader = new FeatureLoader(this, language);
         referenceProcessor = new ReferenceProcessor(this);
         finalizationService = new FinalizationService(this, referenceProcessor);
         markingService = new MarkingService(this, referenceProcessor);
@@ -176,8 +194,8 @@ public class RubyContext {
 
         hashing = new Hashing(generateHashingSeed());
 
-        defaultBacktraceFormatter = BacktraceFormatter.createDefaultFormatter(this);
-        userBacktraceFormatter = new BacktraceFormatter(this, BacktraceFormatter.USER_BACKTRACE_FLAGS);
+        defaultBacktraceFormatter = BacktraceFormatter.createDefaultFormatter(this, language);
+        userBacktraceFormatter = new BacktraceFormatter(this, language, BacktraceFormatter.USER_BACKTRACE_FLAGS);
 
         rubyHome = findRubyHome(options);
         rubyHomeTruffleFile = rubyHome == null ? null : env.getInternalTruffleFile(rubyHome);
@@ -185,7 +203,7 @@ public class RubyContext {
         // Load the core library classes
 
         Metrics.printTime("before-create-core-library");
-        coreLibrary = new CoreLibrary(this);
+        coreLibrary = new CoreLibrary(this, language);
         nativeConfiguration = NativeConfiguration.loadNativeConfiguration(this);
         coreLibrary.initialize();
         valueWrapperManager = new ValueWrapperManager(this);
@@ -205,7 +223,7 @@ public class RubyContext {
         Metrics.printTime("after-initialize-encodings");
 
         Metrics.printTime("before-thread-manager");
-        threadManager = new ThreadManager(this);
+        threadManager = new ThreadManager(this, language);
         threadManager.initialize(truffleNFIPlatform, nativeConfiguration);
         threadManager.initializeMainThread(Thread.currentThread());
         Metrics.printTime("after-thread-manager");
@@ -241,8 +259,8 @@ public class RubyContext {
         Metrics.printTime("after-load-core");
 
         // Share once everything is loaded
-        if (options.SHARED_OBJECTS_ENABLED && options.SHARED_OBJECTS_FORCE) {
-            sharedObjects.startSharing(OptionsCatalog.SHARED_OBJECTS_FORCE.getName() + " being true");
+        if (language.options.SHARED_OBJECTS_ENABLED && language.options.SHARED_OBJECTS_FORCE) {
+            sharedObjects.startSharing(language, OptionsCatalog.SHARED_OBJECTS_FORCE.getName() + " being true");
         }
 
         if (isPreInitializing()) {
@@ -285,7 +303,7 @@ public class RubyContext {
         random = createRandomInstance();
         hashing.patchSeed(generateHashingSeed());
 
-        this.defaultBacktraceFormatter = BacktraceFormatter.createDefaultFormatter(this);
+        this.defaultBacktraceFormatter = BacktraceFormatter.createDefaultFormatter(this, language);
 
         this.truffleNFIPlatform = createNativePlatform();
         encodingManager.initializeDefaultEncodings(truffleNFIPlatform, nativeConfiguration);
@@ -415,14 +433,14 @@ public class RubyContext {
     @TruffleBoundary
     public Object send(Object object, String methodName, Object... arguments) {
         final InternalMethod method = ModuleOperations
-                .lookupMethodUncached(coreLibrary.getMetaClass(object), methodName, null);
+                .lookupMethodUncached(MetaClassNode.getUncached().execute(object), methodName, null);
         if (method == null || method.isUndefined()) {
             return null;
         }
 
         return IndirectCallNode.getUncached().call(
                 method.getCallTarget(),
-                RubyArguments.pack(null, null, null, method, null, object, null, arguments));
+                RubyArguments.pack(null, null, method, null, object, null, arguments));
     }
 
     @TruffleBoundary
@@ -615,14 +633,6 @@ public class RubyContext {
         return callStack;
     }
 
-    public RubyString getFrozenStringLiteral(Rope rope) {
-        return frozenStringLiterals.getFrozenStringLiteral(rope);
-    }
-
-    public RubyString getInternedString(RubyString string) {
-        return frozenStringLiterals.getFrozenStringLiteral(string);
-    }
-
     public Object getClassVariableDefinitionLock() {
         return classVariableDefinitionLock;
     }
@@ -663,7 +673,7 @@ public class RubyContext {
         if (consoleHolder == null) {
             synchronized (this) {
                 if (consoleHolder == null) {
-                    consoleHolder = ConsoleHolder.create(this);
+                    consoleHolder = ConsoleHolder.create(this, language);
                 }
             }
         }
@@ -747,6 +757,10 @@ public class RubyContext {
         return sourceLineOffsets;
     }
 
+    public Map<ImmutableRubyString, NativeRope> getImmutableNativeRopes() {
+        return immutableNativeRopes;
+    }
+
     private static SecureRandom createRandomInstance() {
         try {
             /* We want to use a non-blocking source because this is what MRI does (via /dev/urandom) and it's been found
@@ -806,6 +820,14 @@ public class RubyContext {
 
     public Object getTopScopeObject() {
         return coreLibrary.topScopeObject;
+    }
+
+    public AssumedValue<Boolean> getWarningCategoryDeprecated() {
+        return warningCategoryDeprecated;
+    }
+
+    public AssumedValue<Boolean> getWarningCategoryExperimental() {
+        return warningCategoryExperimental;
     }
 
     @TruffleBoundary

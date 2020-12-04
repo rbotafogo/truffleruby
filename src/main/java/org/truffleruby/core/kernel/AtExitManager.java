@@ -16,8 +16,10 @@ import java.util.concurrent.ConcurrentLinkedDeque;
 
 import org.truffleruby.RubyContext;
 import org.truffleruby.core.exception.RubyException;
+import org.truffleruby.core.exception.RubySystemExit;
 import org.truffleruby.core.proc.ProcOperations;
 import org.truffleruby.core.proc.RubyProc;
+import org.truffleruby.language.backtrace.BacktraceFormatter;
 import org.truffleruby.language.control.ExitException;
 import org.truffleruby.language.control.RaiseException;
 
@@ -68,9 +70,8 @@ public class AtExitManager {
                 lastException = e.getException();
             } catch (ExitException e) {
                 throw e;
-            } catch (Exception e) {
-                System.err.println("Unexpected internal exception in " + name + ":");
-                e.printStackTrace();
+            } catch (RuntimeException | Error e) {
+                BacktraceFormatter.printInternalError(context, e, "Unexpected internal exception in " + name);
             }
         }
     }
@@ -83,9 +84,8 @@ public class AtExitManager {
     }
 
     public static boolean isSilentException(RubyContext context, RubyException rubyException) {
-        final IsANode isANode = IsANode.getUncached();
-        return isANode.executeIsA(rubyException, context.getCoreLibrary().systemExitClass) ||
-                isANode.executeIsA(rubyException, context.getCoreLibrary().signalExceptionClass);
+        return rubyException instanceof RubySystemExit ||
+                IsANode.getUncached().executeIsA(rubyException, context.getCoreLibrary().signalExceptionClass);
     }
 
     private static void handleAtExitException(RubyContext context, RubyException rubyException) {

@@ -9,7 +9,6 @@
  */
 package org.truffleruby.language;
 
-import org.truffleruby.RubyContext;
 import org.truffleruby.RubyLanguage;
 import org.truffleruby.language.methods.SharedMethodInfo;
 
@@ -21,29 +20,28 @@ import com.oracle.truffle.api.source.SourceSection;
 import com.oracle.truffle.api.utilities.CyclicAssumption;
 import org.truffleruby.language.methods.Split;
 
-public class RubyRootNode extends RubyBaseRootNode {
+public final class RubyRootNode extends RubyBaseRootNode {
 
-    private final RubyContext context;
+    private final RubyLanguage language;
     private final SharedMethodInfo sharedMethodInfo;
     private Split split;
 
     @Child private RubyNode body;
 
-    private CyclicAssumption needsCallerAssumption = new CyclicAssumption("needs caller frame");
-    private CyclicAssumption needsStorageAssumption = new CyclicAssumption("needs caller special variables");
+    private CyclicAssumption needsCallerAssumption = new CyclicAssumption("needs caller data");
 
     public RubyRootNode(
-            RubyContext context,
+            RubyLanguage language,
             SourceSection sourceSection,
             FrameDescriptor frameDescriptor,
             SharedMethodInfo sharedMethodInfo,
             RubyNode body,
             Split split) {
-        super(context.getLanguageSlow(), frameDescriptor, sourceSection);
+        super(language, frameDescriptor, sourceSection);
         assert sourceSection != null;
         assert body != null;
 
-        this.context = context;
+        this.language = language;
         this.sharedMethodInfo = sharedMethodInfo;
         this.body = body;
         this.split = split;
@@ -59,8 +57,7 @@ public class RubyRootNode extends RubyBaseRootNode {
 
     @Override
     public Object execute(VirtualFrame frame) {
-        assert RubyLanguage.getCurrentContext() == context;
-        context.getSafepointManager().poll(this);
+        SafepointManager.poll(language, this);
         return body.execute(frame);
     }
 
@@ -99,31 +96,22 @@ public class RubyRootNode extends RubyBaseRootNode {
         return body;
     }
 
-    public RubyContext getContext() {
-        return context;
-    }
-
     public Assumption getNeedsCallerAssumption() {
         return needsCallerAssumption.getAssumption();
     }
 
     public void invalidateNeedsCallerAssumption() {
-        needsCallerAssumption.invalidate();
+        needsCallerAssumption.invalidate("needs caller frame");
     }
 
-    public Assumption getNeedsStorageAssumption() {
-        return needsStorageAssumption.getAssumption();
-    }
-
-    public synchronized void invalidateNeedsStorageAssumption() {
-        needsStorageAssumption.invalidate();
+    public synchronized void invalidateNeedsVariablesAssumption() {
+        needsCallerAssumption.invalidate("needs caller special variable storage");
     }
 
     @Override
     public Node copy() {
         RubyRootNode root = (RubyRootNode) super.copy();
-        root.needsCallerAssumption = new CyclicAssumption("needs caller frame");
-        root.needsStorageAssumption = new CyclicAssumption("needs caller special variables");
+        root.needsCallerAssumption = new CyclicAssumption("needs caller data");
         return root;
     }
 

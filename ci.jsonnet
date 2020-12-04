@@ -30,7 +30,7 @@ local common = (import "common.json");
 local part_definitions = {
   local jt = function(args) [["ruby", "tool/jt.rb"] + args],
   local mri_path = function(version) "/cm/shared/apps/ruby/" + version + "/bin/ruby",
-  local mri_version = "2.6.5",
+  local mri_version = "2.7.2",
 
   use: {
     common: {
@@ -221,7 +221,6 @@ local part_definitions = {
       packages+: {
         git: ">=1.8.3",
         mercurial: ">=3.2.4",
-        ruby: ">=" + mri_version,
         binutils: ">=2.30",
       },
     },
@@ -230,6 +229,9 @@ local part_definitions = {
       platform_name:: "LinuxAMD64",
       platform: "linux",
       arch:: "amd64",
+      packages+: {
+        ruby: ">=" + mri_version,
+      },
       "$.cap":: {
         normal_machine: ["linux", "amd64"],
         bench_machine: ["x52"] + self.normal_machine + ["no_frequency_scaling"],
@@ -239,6 +241,9 @@ local part_definitions = {
       platform_name:: "LinuxARM64",
       platform: "linux",
       arch:: "aarch64",
+      packages+: {
+        ruby: ">=2.6",
+      },
       "$.cap":: {
         normal_machine: ["linux", "aarch64"],
       },
@@ -477,8 +482,8 @@ local composition_environment = utils.add_inclusion_tracking(part_definitions, "
       // Order: platform, jdk, mx_env. Keep aligned for an easy visual comparison.
       "ruby-test-specs-linux":       $.platform.linux  + $.jdk.v8  + $.env.jvm + gate_no_build + $.use.build_no_clean + $.run.test_unit_tck + native_config + $.run.clean + $.run.test_specs + { timelimit: "45:00" },
       "ruby-test-specs-linux-11":    $.platform.linux  + $.jdk.v11 + $.env.jvm + gate_no_build + $.use.build_no_clean + $.run.test_unit_tck + native_config + $.run.clean + $.run.test_specs + { timelimit: "45:00" },
-      "ruby-test-specs-darwin":      $.platform.darwin + $.jdk.v8  + $.env.jvm + gate_no_build + $.use.build_no_clean + $.run.test_unit_tck + native_config + $.run.clean + $.run.test_specs + { timelimit: "01:25:00" },
-      "ruby-test-specs-darwin-11":   $.platform.darwin + $.jdk.v11 + $.env.jvm + gate_no_build + $.use.build_no_clean + $.run.test_unit_tck + native_config + $.run.clean + $.run.test_specs + { timelimit: "01:25:00" },
+      "ruby-test-specs-darwin":      $.platform.darwin + $.jdk.v8  + $.env.jvm + gate_no_build + $.use.build_no_clean + $.run.test_unit_tck + native_config + $.run.clean + $.run.test_specs + { timelimit: "01:35:00" },
+      "ruby-test-specs-darwin-11":   $.platform.darwin + $.jdk.v11 + $.env.jvm + gate_no_build + $.use.build_no_clean + $.run.test_unit_tck + native_config + $.run.clean + $.run.test_specs + { timelimit: "01:35:00" },
       "ruby-test-fast-linux-arm64":  $.platform.linux_arm64 + $.jdk.v11 + $.env.jvm + gate + $.run.test_fast + native_config + { timelimit: "30:00" },
       "ruby-test-fast-linux":        $.platform.linux  + $.jdk.v8  + $.env.jvm + gate + $.run.test_fast + { timelimit: "30:00" },  # To catch missing slow tags
       "ruby-test-mri-linux":         $.platform.linux  + $.jdk.v8  + $.env.jvm + gate + $.run.test_mri + { timelimit: "45:00" },
