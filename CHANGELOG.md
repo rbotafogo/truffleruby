@@ -34,11 +34,14 @@ Compatibility:
 * `**kwargs` now accept non-Symbol keys like Ruby 2.7.
 * Updated the Unicode Emoji version (#2173, @wildmaples).
 * Added `Enumerator::Yielder#to_proc`.
+* Implemented `Enumerator::Lazy#eager`.
+* Updated `Method#inspect` to include paremeter information.
 
 Performance:
 
 * Refactor and implement more performant `MatchData#length` (#2147, @LillianZ).
 * Refactor and implement more performant `Array#sample` (#2148, @LillianZ).
+* `String#inspect` is now more efficient.
 
 Changes:
 
