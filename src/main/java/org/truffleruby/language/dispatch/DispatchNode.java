@@ -128,7 +128,8 @@ public class DispatchNode extends FrameAndVariablesSendingNode implements Dispat
                     return MISSING;
                 case CALL_METHOD_MISSING:
                     // Both branches implicitly profile through lazy node creation
-                    if (metaclass == getContext().getCoreLibrary().truffleInteropForeignClass) {
+                    if (metaclass == getContext().getCoreLibrary().polyglotForeignArrayClass ||
+                            metaclass == getContext().getCoreLibrary().polyglotForeignObjectClass) {
                         return callForeign(receiver, methodName, block, arguments);
                     } else {
                         return callMethodMissing(frame, receiver, methodName, block, arguments);
