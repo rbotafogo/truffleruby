@@ -113,7 +113,7 @@ public abstract class MetaClassNode extends RubyBaseNode {
     }
 
     // Foreign object
-    @Specialization(guards = "isForeignObject(object)", limit="1")
+    @Specialization(guards = "isForeignObject(object)", limit = "1")
     protected RubyClass metaClassForeign(Object object,
             @CachedLibrary("object") InteropLibrary interop,
             @CachedContext(RubyLanguage.class) RubyContext context) {

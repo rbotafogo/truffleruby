@@ -98,7 +98,7 @@ public abstract class LogicalClassNode extends RubyBaseNode {
         return object.getLogicalClass();
     }
 
-    @Specialization(guards = "isForeignObject(object)", limit="1")
+    @Specialization(guards = "isForeignObject(object)", limit = "1")
     protected RubyClass logicalClassForeign(Object object,
             @CachedLibrary("object") InteropLibrary interop,
             @CachedContext(RubyLanguage.class) RubyContext context) {
