@@ -33,7 +33,6 @@ import org.truffleruby.language.methods.CallInternalMethodNodeGen;
 import org.truffleruby.language.methods.InternalMethod;
 import org.truffleruby.language.methods.LookupMethodNode;
 import org.truffleruby.language.methods.LookupMethodNodeGen;
-import org.truffleruby.language.methods.LookupMethodOnSelfNode;
 import org.truffleruby.language.objects.MetaClassNode;
 import org.truffleruby.language.objects.MetaClassNodeGen;
 import org.truffleruby.language.objects.IsANode;
