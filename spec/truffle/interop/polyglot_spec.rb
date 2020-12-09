@@ -12,10 +12,6 @@ require_relative 'fixtures/classes.rb'
 describe Polyglot do
 
   describe "Access to foreign array as ForeignObject" do
-    proxy = -> obj {
-      logger = TruffleInteropSpecs::Logger.new
-      return Truffle::Interop.proxy_foreign_object(obj, logger), obj, logger
-    }
 
     before do
       @foreign = Truffle::Interop.to_java_array([1, 2, 3])
@@ -28,20 +24,20 @@ describe Polyglot do
     end
 
     it "should index array with #[]" do
-       @foreign[0].should == 1
-       @foreign[1].should == 2
-       @foreign[2].should == 3
+      @foreign[0].should == 1
+      @foreign[1].should == 2
+      @foreign[2].should == 3
     end
 
     it "should index array with #at" do
-       @foreign.at(0).should == 1
-       @foreign.at(1).should == 2
-       @foreign.at(3).should == nil
+      @foreign.at(0).should == 1
+      @foreign.at(1).should == 2
+      @foreign.at(3).should == nil
     end
 
     it "should access the first and last elements with #first and #last" do
-     @foreign.first.should == 1
-     @foreign.last.should == 3
+      @foreign.first.should == 1
+      @foreign.last.should == 3
     end
 
     it "can call each on the foreign array" do
@@ -82,7 +78,7 @@ describe Polyglot do
       foreign = Truffle::Interop.to_java_array([1, 2, 4, 2])
       foreign.count.should == 4
       foreign.count(2).should == 2
-      foreign.count { |x| x % 2 == 0}.should == 3
+      foreign.count { |x| x % 2 == 0 }.should == 3
     end
 
     it "should allow the creation of a foreign hash map" do

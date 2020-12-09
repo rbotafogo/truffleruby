@@ -59,7 +59,7 @@ module Polyglot
       if Truffle::Interop.has_array_elements?(self)
         Truffle::Interop.to_array(self)
       else
-        raise RuntimeError.new
+        raise RuntimeError
       end
     end
 
@@ -153,13 +153,13 @@ module Polyglot
     def to_i
       return Truffle::Interop.as_int(self) if Truffle::Interop.fits_in_int?(self)
       return Truffle::Interop.as_long(self) if Truffle::Interop.fits_in_long?(self)
-      raise TypeError.new("can't convert foreign object to Integer")
+      raise TypeError, "can't convert foreign object to Integer"
     end
 
     def to_f
       return Truffle::Interop.as_double(self) if Truffle::Interop.fits_in_double?(self)
       return Truffle::Interop.as_long(self) if Truffle::Interop.fits_in_long?(self)
-      raise TypeError.new("can't convert foreign object to Integer")
+      raise TypeError, "can't convert foreign object to Integer"
     end
 
     def keys()
@@ -198,7 +198,7 @@ module Polyglot
             begin
               Truffle::Interop.invoke(self, method, *args)
             rescue
-              raise NoMethodError.new
+              raise NoMethodError
             end
           else
             Truffle::Interop.read_member(self, method)
