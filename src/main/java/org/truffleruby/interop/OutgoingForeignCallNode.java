@@ -51,7 +51,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     protected final static String SEND = "__send__";
     protected final static String NIL = "nil?";
     protected final static String EQUAL = "equal?";
-    protected final static String DELETE = "delete";
 
     @Specialization(
             guards = {
@@ -151,37 +150,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
         return lhsInterop.isIdentical(receiver, first(args), rhsInterop);
     }
 
-    @Specialization(
-            guards = {
-                    "name == cachedName",
-                    "cachedName.equals(DELETE)",
-                    "args.length == 1",
-                    "isBasicInteger(first(args))" },
-            limit = "1")
-    protected Object deleteArrayElement(Object receiver, String name, Object[] args,
-            @Cached(value = "name", allowUncached = true) @Shared("name") String cachedName,
-            @CachedContext(RubyLanguage.class) RubyContext context,
-            @Cached @Shared("dispatch") DispatchNode dispatchNode) {
-
-        return dispatchNode
-                .call(context.getCoreLibrary().truffleInteropModule, "remove_array_element", receiver, args[0]);
-    }
-
-    @Specialization(
-            guards = {
-                    "name == cachedName",
-                    "cachedName.equals(DELETE)",
-                    "args.length == 1",
-                    "isRubySymbolOrString(first(args))" },
-            limit = "1")
-    protected Object deleteMember(Object receiver, String name, Object[] args,
-            @Cached(value = "name", allowUncached = true) @Shared("name") String cachedName,
-            @CachedContext(RubyLanguage.class) RubyContext context,
-            @Cached @Shared("dispatch") DispatchNode dispatchNode) {
-
-        return dispatchNode.call(context.getCoreLibrary().truffleInteropModule, "remove_member", receiver, args[0]);
-    }
-
     protected static boolean canHaveBadArguments(String cachedName) {
         return cachedName.equals(INDEX_READ) || cachedName.equals(INDEX_WRITE) || cachedName.equals(SEND) ||
                 cachedName.equals(NIL) || cachedName.equals(EQUAL);
@@ -211,7 +179,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
         switch (name) {
             case NIL:
                 return 0;
-            case DELETE:
             case INDEX_READ:
             case EQUAL:
             case SEND:
