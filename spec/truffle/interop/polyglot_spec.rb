@@ -11,14 +11,19 @@ require_relative 'fixtures/classes.rb'
 
 describe Polyglot do
 
-  describe "Access to foreign array as ForeignObject" do
+ proxy = -> obj {
+    logger = TruffleInteropSpecs::Logger.new
+    return Truffle::Interop.proxy_foreign_object(obj, logger), obj, logger
+  }
+
+  describe "Access to foreign array as ForeignArray" do
 
     before do
       @foreign = Truffle::Interop.to_java_array([1, 2, 3])
       @foreign_db = Truffle::Interop.to_java_array([1.4, 2.8, 3.6])
     end
 
-    it "should create a ForeignObject class" do
+    it "should create a ForeignArray class" do
       @foreign.inspect.should =~ /\A#<Java int\[\]:0x\h+ \[1, 2, 3\]>/
       @foreign.length.should == 3
     end
@@ -81,10 +86,17 @@ describe Polyglot do
       foreign.count { |x| x % 2 == 0 }.should == 3
     end
 
-    it "should allow the creation of a foreign hash map" do
+    it "should indicate that Foreign" do
       object = Object.new
       Truffle::Interop.has_members?(object).should == true
     end
+
+    it "should convert to_f properly" do
+      does_not_fit_perfectly_in_double = (1 << 62) + 1
+      pfo, _, l = proxy[does_not_fit_perfectly_in_double]
+      pfo.to_f.should.eql?(does_not_fit_perfectly_in_double.to_f)
+    end
+
   end
 
   describe ".eval(id, code)" do

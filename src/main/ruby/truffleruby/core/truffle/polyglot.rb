@@ -158,8 +158,8 @@ module Polyglot
 
     def to_f
       return Truffle::Interop.as_double(self) if Truffle::Interop.fits_in_double?(self)
-      return Truffle::Interop.as_long(self) if Truffle::Interop.fits_in_long?(self)
-      raise TypeError, "can't convert foreign object to Integer"
+      return Truffle::Interop.as_long(self).to_f if Truffle::Interop.fits_in_long?(self)
+      raise TypeError, "can't convert foreign object to Float"
     end
 
     def keys()
