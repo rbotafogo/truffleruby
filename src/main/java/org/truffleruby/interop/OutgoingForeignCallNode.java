@@ -28,9 +28,7 @@ import com.oracle.truffle.api.dsl.GenerateUncached;
 import com.oracle.truffle.api.dsl.Specialization;
 import com.oracle.truffle.api.interop.InteropException;
 import com.oracle.truffle.api.interop.InteropLibrary;
-import com.oracle.truffle.api.interop.UnsupportedMessageException;
 import com.oracle.truffle.api.library.CachedLibrary;
-import com.oracle.truffle.api.profiles.BranchProfile;
 import com.oracle.truffle.api.profiles.ConditionProfile;
 
 @GenerateUncached
@@ -45,7 +43,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     public abstract Object executeCall(Object receiver, String name, Object[] args);
 
     protected final static String INDEX_READ = "[]";
-    protected final static String INDEX_WRITE = "[]=";
     protected final static String CALL = "call";
     protected final static String NEW = "new";
     protected final static String SEND = "__send__";
@@ -74,33 +71,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
             @Cached(value = "name", allowUncached = true) @Shared("name") String cachedName,
             @Cached InteropNodes.ReadMemberNode readNode) {
         return readNode.execute(receiver, args[0]);
-    }
-
-    @Specialization(
-            guards = {
-                    "name == cachedName",
-                    "cachedName.equals(INDEX_WRITE)",
-                    "args.length == 2",
-                    "isBasicInteger(first(args))" },
-            limit = "1")
-    protected Object writeArrayElement(Object receiver, String name, Object[] args,
-            @Cached(value = "name", allowUncached = true) @Shared("name") String cachedName,
-            @Cached InteropNodes.WriteArrayElementNode writeNode) {
-
-        return writeNode.execute(receiver, args[0], args[1]);
-    }
-
-    @Specialization(
-            guards = {
-                    "name == cachedName",
-                    "cachedName.equals(INDEX_WRITE)",
-                    "args.length == 2",
-                    "isRubySymbolOrString(first(args))" },
-            limit = "1")
-    protected Object writeMember(Object receiver, String name, Object[] args,
-            @Cached(value = "name", allowUncached = true) @Shared("name") String cachedName,
-            @Cached InteropNodes.WriteMemberNode writeNode) {
-        return writeNode.execute(receiver, args[0], args[1]);
     }
 
     protected static Object first(Object[] args) {
@@ -134,7 +104,7 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     }
 
     protected static boolean canHaveBadArguments(String cachedName) {
-        return cachedName.equals(INDEX_READ) || cachedName.equals(INDEX_WRITE) || cachedName.equals(SEND);
+        return cachedName.equals(INDEX_READ) || cachedName.equals(SEND);
     }
 
     protected static boolean badArity(Object[] args, int cachedArity, String cachedName) {
@@ -162,8 +132,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
             case INDEX_READ:
             case SEND:
                 return 1;
-            case INDEX_WRITE:
-                return 2;
             default:
                 throw new IllegalStateException();
         }
@@ -249,7 +217,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
             guards = {
                     "name == cachedName",
                     "!cachedName.equals(INDEX_READ)",
-                    "!cachedName.equals(INDEX_WRITE)",
                     "!cachedName.equals(CALL)",
                     "!cachedName.equals(NEW)",
                     "!cachedName.equals(SEND)",
@@ -277,7 +244,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
             guards = {
                     "name == cachedName",
                     "!cachedName.equals(INDEX_READ)",
-                    "!cachedName.equals(INDEX_WRITE)",
                     "!cachedName.equals(CALL)",
                     "!cachedName.equals(NEW)",
                     "!cachedName.equals(SEND)",
@@ -300,7 +266,7 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
 
     @TruffleBoundary
     protected static boolean isAssignmentMethod(String name) {
-        return !name.isEmpty() && !name.equals(INDEX_WRITE) && '=' == name.charAt(name.length() - 1);
+        return !name.isEmpty() && '=' == name.charAt(name.length() - 1);
     }
 
     protected static String getPropertyFromName(String name) {
