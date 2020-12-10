@@ -103,29 +103,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
         return dispatchNode.dispatch(null, receiver, nameToJavaString.execute(sendName), null, sendArgs);
     }
 
-    protected static boolean canHaveBadArguments(String cachedName) {
-        return cachedName.equals(INDEX_READ) || cachedName.equals(SEND);
-    }
-
-    protected static boolean badArity(Object[] args, int cachedArity, String cachedName) {
-        return cachedName.equals(SEND) ? args.length < cachedArity : args.length != cachedArity;
-    }
-
-    @Specialization(
-            guards = {
-                    "name == cachedName",
-                    "canHaveBadArguments(cachedName)",
-                    "badArity(args, cachedArity, cachedName)" },
-            limit = "1" /* the name is constant */)
-    protected Object withBadArguments(Object receiver, String name, Object[] args,
-            @Cached(value = "name", allowUncached = true) @Shared("name") String cachedName,
-            @Cached(value = "expectedArity(cachedName)", allowUncached = true) int cachedArity,
-            @CachedContext(RubyLanguage.class) RubyContext context) {
-        throw new RaiseException(
-                context,
-                context.getCoreExceptions().argumentError(args.length, cachedArity, this));
-    }
-
     @TruffleBoundary
     protected static int expectedArity(String name) {
         switch (name) {

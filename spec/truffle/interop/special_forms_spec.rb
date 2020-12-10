@@ -136,9 +136,10 @@ describe "Interop special forms" do
   end
 
   it description['.size', :getArraySize] do
+    # Method size does not exist for a foreign object
     pfo, _, l = proxy[Object.new]
-    -> { pfo.size }.should raise_error(Polyglot::UnsupportedMessageError)
-    l.log.should include(['getArraySize'])
+    -> { pfo.size }.should raise_error(NameError)
+    # l.log.should include(['getArraySize'])
   end
 
   it description['.keys', :getMembers] do
@@ -237,15 +238,17 @@ describe "Interop special forms" do
   end
 
   it doc['.to_a', 'converts to a Ruby `Array` with `Truffle::Interop.to_array(foreign_object)`'] do
+    # method to_a does not exist for a foreign object
     pfo, _, l = proxy[Object.new]
-    -> { pfo.to_a }.should raise_error(RuntimeError)
-    l.log.should include(["hasArrayElements"])
+    -> { pfo.to_a }.should raise_error(NameError)
+    # l.log.should include(["hasArrayElements"])
   end
 
   it doc['.to_ary', 'converts to a Ruby `Array` with `Truffle::Interop.to_array(foreign_object)`'] do
+    # method to_a does not exist for a foreign object
     pfo, _, l = proxy[Object.new]
-    -> { pfo.to_a }.should raise_error(RuntimeError)
-    l.log.should include(["hasArrayElements"])
+    -> { pfo.to_a }.should raise_error(NameError)
+    # l.log.should include(["hasArrayElements"])
   end
 
   it doc['.to_f', 'tries to converts to a Ruby `Float` using `asDouble()` and `(double) asLong()` or raises `TypeError`'] do
