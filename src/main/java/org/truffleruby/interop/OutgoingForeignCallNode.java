@@ -54,30 +54,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     protected final static String DELETE = "delete";
     protected final static String KEYS = "keys";
     protected final static String CLASS = "class";
-    protected final static String OBJECT_ID = "object_id";
-    protected final static String ID = "__id__";
-
-    @Specialization(
-            guards = {
-                    "name == cachedName",
-                    "cachedName.equals(OBJECT_ID) || cachedName.equals(ID)",
-                    "args.length == 0" },
-            limit = "1")
-    protected int objectId(Object receiver, String name, Object[] args,
-            @Cached(value = "name", allowUncached = true) @Shared("name") String cachedName,
-            @CachedLibrary("receiver") InteropLibrary interop,
-            @Cached ConditionProfile hasIdentityProfile,
-            @Cached TranslateInteropExceptionNode translateInteropException) {
-        if (hasIdentityProfile.profile(interop.hasIdentity(receiver))) {
-            try {
-                return interop.identityHashCode(receiver);
-            } catch (UnsupportedMessageException e) {
-                throw translateInteropException.execute(e);
-            }
-        } else {
-            return System.identityHashCode(receiver);
-        }
-    }
 
     @Specialization(
             guards = {
@@ -210,8 +186,7 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
 
     protected static boolean canHaveBadArguments(String cachedName) {
         return cachedName.equals(INDEX_READ) || cachedName.equals(INDEX_WRITE) || cachedName.equals(SEND) ||
-                cachedName.equals(NIL) || cachedName.equals(EQUAL) || cachedName.equals(OBJECT_ID) ||
-                cachedName.equals(ID);
+                cachedName.equals(NIL) || cachedName.equals(EQUAL);
     }
 
     protected static boolean badArity(Object[] args, int cachedArity, String cachedName) {
@@ -239,8 +214,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
             case KEYS:
             case CLASS:
             case NIL:
-            case OBJECT_ID:
-            case ID:
                 return 0;
             case DELETE:
             case INDEX_READ:
