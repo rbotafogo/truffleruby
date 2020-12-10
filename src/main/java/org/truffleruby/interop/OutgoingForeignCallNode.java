@@ -94,7 +94,7 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     @Specialization(guards = { "name == cachedName", "cachedName.equals(SEND)", "args.length >= 1" }, limit = "1")
     protected Object sendOutgoing(Object receiver, String name, Object[] args,
             @Cached(value = "name", allowUncached = true) @Shared("name") String cachedName,
-            @Cached @Shared("dispatch") DispatchNode dispatchNode,
+            @Cached DispatchNode dispatchNode,
             @Cached NameToJavaStringNode nameToJavaString) {
 
         final Object sendName = args[0];
@@ -121,30 +121,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
 
     protected static boolean isRedirectToTruffleInterop(String cachedName) {
         return specialToInteropMethod(cachedName) != null;
-    }
-
-    @Specialization(
-            guards = { "isRedirectToTruffleInterop(cachedName)", "args.length == cachedArity" },
-            limit = "1" /* the name is constant */)
-    protected Object redirectToTruffleInterop(Object receiver, String name, Object[] args,
-            @Cached(value = "name", allowUncached = true) @Shared("name") String cachedName,
-            @Cached(value = "expectedArity(cachedName)", allowUncached = true) int cachedArity,
-            @Cached(value = "specialToInteropMethod(cachedName)", allowUncached = true) String interopMethodName,
-            @CachedContext(RubyLanguage.class) RubyContext context,
-            @Cached @Shared("dispatch") DispatchNode dispatchNode,
-            @Cached ConditionProfile errorProfile) {
-
-        if (errorProfile.profile(args.length == cachedArity)) {
-            final Object[] arguments = ArrayUtils.unshift(args, receiver);
-            return dispatchNode.call(
-                    context.getCoreLibrary().truffleInteropModule,
-                    interopMethodName,
-                    arguments);
-        } else {
-            throw new RaiseException(
-                    context,
-                    context.getCoreExceptions().argumentError(args.length, cachedArity, this));
-        }
     }
 
     @Specialization(guards = { "name == cachedName", "isOperatorMethod(cachedName)" }, limit = "1")
