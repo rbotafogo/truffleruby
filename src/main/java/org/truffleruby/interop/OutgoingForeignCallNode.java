@@ -48,7 +48,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     protected final static String INDEX_WRITE = "[]=";
     protected final static String CALL = "call";
     protected final static String NEW = "new";
-    protected final static String TO_A = "to_a";
     protected final static String TO_ARY = "to_ary";
     protected final static String SEND = "__send__";
     protected final static String NIL = "nil?";
@@ -244,7 +243,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     @TruffleBoundary
     protected static int expectedArity(String name) {
         switch (name) {
-            case TO_A:
             case TO_ARY:
             case SIZE:
             case KEYS:
@@ -273,7 +271,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     @TruffleBoundary
     protected static String specialToInteropMethod(String name) {
         switch (name) {
-            case TO_A:
             case TO_ARY:
                 return "to_array";
             case SIZE:
