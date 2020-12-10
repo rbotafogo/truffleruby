@@ -54,8 +54,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     protected final static String DELETE = "delete";
     protected final static String KEYS = "keys";
     protected final static String CLASS = "class";
-    protected final static String IS_A = "is_a?";
-    protected final static String KIND_OF = "kind_of?";
     protected final static String OBJECT_ID = "object_id";
     protected final static String ID = "__id__";
 
@@ -245,8 +243,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
             case ID:
                 return 0;
             case DELETE:
-            case IS_A:
-            case KIND_OF:
             case INDEX_READ:
             case EQUAL:
             case SEND:
@@ -265,9 +261,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
                 return "members";
             case CLASS:
                 return "foreign_class";
-            case IS_A:
-            case KIND_OF:
-                return "foreign_is_a?";
             default:
                 return null;
         }
