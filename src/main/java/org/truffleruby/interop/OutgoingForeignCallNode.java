@@ -49,7 +49,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     protected final static String CALL = "call";
     protected final static String NEW = "new";
     protected final static String SEND = "__send__";
-    protected final static String NIL = "nil?";
 
     @Specialization(
             guards = {
@@ -134,16 +133,8 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
         return dispatchNode.dispatch(null, receiver, nameToJavaString.execute(sendName), null, sendArgs);
     }
 
-    @Specialization(guards = { "name == cachedName", "cachedName.equals(NIL)", "args.length == 0" }, limit = "1")
-    protected Object nil(Object receiver, String name, Object[] args,
-            @Cached(value = "name", allowUncached = true) @Shared("name") String cachedName,
-            @Cached InteropNodes.NullNode nullNode) {
-        return nullNode.execute(receiver);
-    }
-
     protected static boolean canHaveBadArguments(String cachedName) {
-        return cachedName.equals(INDEX_READ) || cachedName.equals(INDEX_WRITE) || cachedName.equals(SEND) ||
-                cachedName.equals(NIL);
+        return cachedName.equals(INDEX_READ) || cachedName.equals(INDEX_WRITE) || cachedName.equals(SEND);
     }
 
     protected static boolean badArity(Object[] args, int cachedArity, String cachedName) {
@@ -168,8 +159,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     @TruffleBoundary
     protected static int expectedArity(String name) {
         switch (name) {
-            case NIL:
-                return 0;
             case INDEX_READ:
             case SEND:
                 return 1;
@@ -264,7 +253,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
                     "!cachedName.equals(CALL)",
                     "!cachedName.equals(NEW)",
                     "!cachedName.equals(SEND)",
-                    "!cachedName.equals(NIL)",
                     "!isRedirectToTruffleInterop(cachedName)",
                     "!isOperatorMethod(cachedName)",
                     "!isAssignmentMethod(cachedName)",
@@ -293,7 +281,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
                     "!cachedName.equals(CALL)",
                     "!cachedName.equals(NEW)",
                     "!cachedName.equals(SEND)",
-                    "!cachedName.equals(NIL)",
                     "!isRedirectToTruffleInterop(cachedName)",
                     "!isOperatorMethod(cachedName)",
                     "!isAssignmentMethod(cachedName)",
