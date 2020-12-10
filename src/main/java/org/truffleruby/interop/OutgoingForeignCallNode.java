@@ -116,10 +116,7 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
 
     @TruffleBoundary
     protected static String specialToInteropMethod(String name) {
-        switch (name) {
-            default:
-                return null;
-        }
+        return null;
     }
 
     protected static boolean isRedirectToTruffleInterop(String cachedName) {
