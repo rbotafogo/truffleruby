@@ -54,9 +54,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     protected final static String DELETE = "delete";
     protected final static String KEYS = "keys";
     protected final static String CLASS = "class";
-    protected final static String INSPECT = "inspect";
-    protected final static String TO_S = "to_s";
-    protected final static String TO_STR = "to_str";
     protected final static String IS_A = "is_a?";
     protected final static String KIND_OF = "kind_of?";
     protected final static String OBJECT_ID = "object_id";
@@ -242,10 +239,7 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     protected static int expectedArity(String name) {
         switch (name) {
             case KEYS:
-            case INSPECT:
             case CLASS:
-            case TO_S:
-            case TO_STR:
             case NIL:
             case OBJECT_ID:
             case ID:
@@ -269,14 +263,8 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
         switch (name) {
             case KEYS:
                 return "members";
-            case INSPECT:
-                return "foreign_inspect";
             case CLASS:
                 return "foreign_class";
-            case TO_S:
-                return "foreign_to_s";
-            case TO_STR:
-                return "foreign_to_str";
             case IS_A:
             case KIND_OF:
                 return "foreign_is_a?";
