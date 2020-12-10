@@ -162,7 +162,7 @@ module Polyglot
       raise TypeError, "can't convert foreign object to Float"
     end
 
-    def keys()
+    def keys
       Truffle::Interop.members(self, false)
     end
 

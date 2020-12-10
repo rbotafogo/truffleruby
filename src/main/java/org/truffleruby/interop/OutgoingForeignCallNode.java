@@ -52,8 +52,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     protected final static String NIL = "nil?";
     protected final static String EQUAL = "equal?";
     protected final static String DELETE = "delete";
-    protected final static String KEYS = "keys";
-    protected final static String CLASS = "class";
 
     @Specialization(
             guards = {
@@ -211,8 +209,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     @TruffleBoundary
     protected static int expectedArity(String name) {
         switch (name) {
-            case KEYS:
-            case CLASS:
             case NIL:
                 return 0;
             case DELETE:
@@ -230,10 +226,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     @TruffleBoundary
     protected static String specialToInteropMethod(String name) {
         switch (name) {
-            case KEYS:
-                return "members";
-            case CLASS:
-                return "foreign_class";
             default:
                 return null;
         }
