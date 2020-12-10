@@ -52,7 +52,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     protected final static String NIL = "nil?";
     protected final static String EQUAL = "equal?";
     protected final static String DELETE = "delete";
-    protected final static String SIZE = "size";
     protected final static String KEYS = "keys";
     protected final static String CLASS = "class";
     protected final static String INSPECT = "inspect";
@@ -242,7 +241,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     @TruffleBoundary
     protected static int expectedArity(String name) {
         switch (name) {
-            case SIZE:
             case KEYS:
             case INSPECT:
             case CLASS:
@@ -269,8 +267,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     @TruffleBoundary
     protected static String specialToInteropMethod(String name) {
         switch (name) {
-            case SIZE:
-                return "array_size";
             case KEYS:
                 return "members";
             case INSPECT:
