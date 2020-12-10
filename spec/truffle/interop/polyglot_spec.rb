@@ -7,14 +7,8 @@
 # GNU Lesser General Public License version 2.1.
 
 require_relative '../../ruby/spec_helper'
-require_relative 'fixtures/classes.rb'
 
 describe Polyglot do
-
- proxy = -> obj {
-    logger = TruffleInteropSpecs::Logger.new
-    return Truffle::Interop.proxy_foreign_object(obj, logger), obj, logger
-  }
 
   describe "Access to foreign array as ForeignArray" do
 
@@ -89,12 +83,6 @@ describe Polyglot do
     it "should indicate that Foreign" do
       object = Object.new
       Truffle::Interop.has_members?(object).should == true
-    end
-
-    it "should convert to_f properly" do
-      does_not_fit_perfectly_in_double = (1 << 62) + 1
-      pfo, _, l = proxy[does_not_fit_perfectly_in_double]
-      pfo.to_f.should.eql?(does_not_fit_perfectly_in_double.to_f)
     end
 
   end
