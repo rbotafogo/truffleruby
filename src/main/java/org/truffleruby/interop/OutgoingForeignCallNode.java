@@ -13,7 +13,6 @@ import java.util.Arrays;
 
 import org.truffleruby.RubyContext;
 import org.truffleruby.RubyLanguage;
-import org.truffleruby.core.array.ArrayUtils;
 import org.truffleruby.core.cast.NameToJavaStringNode;
 import org.truffleruby.core.cast.ToSymbolNode;
 import org.truffleruby.language.RubyBaseNode;
@@ -114,15 +113,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
         }
     }
 
-    @TruffleBoundary
-    protected static String specialToInteropMethod(String name) {
-        return null;
-    }
-
-    protected static boolean isRedirectToTruffleInterop(String cachedName) {
-        return specialToInteropMethod(cachedName) != null;
-    }
-
     @Specialization(guards = { "name == cachedName", "isOperatorMethod(cachedName)" }, limit = "1")
     protected Object operator(Object receiver, String name, Object[] args,
             @Cached(value = "name", allowUncached = true) @Shared("name") String cachedName,
@@ -170,7 +160,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
                     "!cachedName.equals(CALL)",
                     "!cachedName.equals(NEW)",
                     "!cachedName.equals(SEND)",
-                    "!isRedirectToTruffleInterop(cachedName)",
                     "!isOperatorMethod(cachedName)",
                     "!isAssignmentMethod(cachedName)",
                     "args.length == 0"
@@ -197,7 +186,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
                     "!cachedName.equals(CALL)",
                     "!cachedName.equals(NEW)",
                     "!cachedName.equals(SEND)",
-                    "!isRedirectToTruffleInterop(cachedName)",
                     "!isOperatorMethod(cachedName)",
                     "!isAssignmentMethod(cachedName)",
                     "args.length != 0"
