@@ -50,7 +50,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
     protected final static String NEW = "new";
     protected final static String TO_A = "to_a";
     protected final static String TO_ARY = "to_ary";
-    protected final static String RESPOND_TO = "respond_to?";
     protected final static String SEND = "__send__";
     protected final static String NIL = "nil?";
     protected final static String EQUAL = "equal?";
@@ -257,7 +256,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
             case OBJECT_ID:
             case ID:
                 return 0;
-            case RESPOND_TO:
             case DELETE:
             case IS_A:
             case KIND_OF:
@@ -282,8 +280,6 @@ public abstract class OutgoingForeignCallNode extends RubyBaseNode {
                 return "array_size";
             case KEYS:
                 return "members";
-            case RESPOND_TO:
-                return "foreign_respond_to?";
             case INSPECT:
                 return "foreign_inspect";
             case CLASS:
