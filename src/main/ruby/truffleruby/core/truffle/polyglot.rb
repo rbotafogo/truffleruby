@@ -180,33 +180,6 @@ module Polyglot
       Truffle::Interop.unbox_if_needed(self) + Truffle::Interop.unbox_if_needed(other_object)
     end
 
-    def method_missing(method, *args, &block)
-      args << block if block_given?
-
-      case method
-      # when missing method has an '=' sign in it...
-      when ->(x) { x =~ /(.*)=$/ }
-        Truffle::Interop.write_member(self, $1, *args)
-      else
-        if (Truffle::Interop.is_member_invocable?(self, method))
-          Truffle::Interop.invoke(self, method, *args)
-        else
-          if (args.size > 0)
-            # Since it is not invocable, then there is no reason to invoke the method with the block_given
-            # arguments, but special_forms_spec at line 173 specifies that the call should be made.  Seems
-            # like a wrong spec and probably the spec should be changed
-            begin
-              Truffle::Interop.invoke(self, method, *args)
-            rescue
-              raise NoMethodError
-            end
-          else
-            Truffle::Interop.read_member(self, method)
-          end
-        end
-      end
-    end
-
   end
 
   class ForeignArray < ForeignObject
