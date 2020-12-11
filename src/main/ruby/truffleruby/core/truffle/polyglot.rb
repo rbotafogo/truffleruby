@@ -37,6 +37,26 @@ module Polyglot
   # HasArrayElementsTrait
   module HasArrayElementsTrait
 
+    private def read_array_element(index)
+      Truffle::Interop.read_array_element(self, index)
+    end
+
+    def [](index)
+      index += length if index < 0
+      return nil if (index < 0 || index >= length)
+      read_array_element(index)
+    end
+
+    alias_method :at, :[]
+
+    def first
+      read_array_element(0)
+    end
+
+    def last
+      read_array_element(length - 1)
+    end
+
     def size
       Truffle::Interop.array_size(self)
     end
@@ -64,24 +84,6 @@ module Polyglot
     end
 
     alias_method :to_ary, :to_a
-
-    def read_array_element(index)
-      Truffle::Interop.read_array_element(self, index)
-    end
-
-    def at(index)
-      index += length if index < 0
-      return nil if (index < 0 || index >= length)
-      read_array_element(index)
-    end
-
-    def first
-      read_array_element(0)
-    end
-
-    def last
-      read_array_element(length - 1)
-    end
 
     def each(*args)
       return enum_for(:each) unless block_given?
@@ -174,10 +176,6 @@ module Polyglot
     def delete(index)
       Truffle::Interop.remove_array_element(self, index) if index.is_a? Numeric
       Truffle::Interop.remove_member(self, index)
-    end
-
-    def +(other_object)
-      Truffle::Interop.unbox_if_needed(self) + Truffle::Interop.unbox_if_needed(other_object)
     end
 
   end

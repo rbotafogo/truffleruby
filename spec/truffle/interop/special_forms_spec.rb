@@ -67,9 +67,9 @@ describe "Interop special forms" do
 
   it description['[index]', :readArrayElement, [:index]] do
     pfo, pa, l  = proxy[TruffleInteropSpecs::PolyglotArray.new]
-    -> { pfo[0] }.should raise_error(IndexError)
-    l.log.should include(['readArrayElement', 0])
-    pa.log.should include([:polyglot_read_array_element, 0])
+    pfo[0].should == nil
+    l.log.should include(['getArraySize'])
+    pa.log.should include([:polyglot_array_size])
   end
 
   it description['[name] = value', :writeMember, [:name, :value]] do

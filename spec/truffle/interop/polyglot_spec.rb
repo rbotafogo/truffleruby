@@ -26,6 +26,7 @@ describe Polyglot do
       @foreign[0].should == 1
       @foreign[1].should == 2
       @foreign[2].should == 3
+      @foreign[5].should == nil
     end
 
     it "should index array with #at" do
